@@ -1,4 +1,4 @@
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 from .core.csv import append_csv, read_csv, write_csv
 from .core.exceptions import AppException, CriticalException

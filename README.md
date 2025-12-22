@@ -107,4 +107,4 @@ Apache-2.0 License - see LICENSE file for details
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+This project is not accepting contributions at this time.
