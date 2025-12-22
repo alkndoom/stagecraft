@@ -1,0 +1,11 @@
+.venv 
+.mypy_cache
+.ruff_cache
+**/__pycache__
+.vscode
+
+# Python packaging
+dist/
+build/
+*.egg-info/
+.eggs/
