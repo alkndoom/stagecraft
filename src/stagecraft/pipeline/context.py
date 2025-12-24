@@ -8,7 +8,7 @@ to optimize memory usage during pipeline execution.
 
 from typing import Any, Dict, Optional, Set
 
-from src.pipeline.memory import MemoryConfig, MemoryManager
+from .memory import MemoryConfig, MemoryManager
 
 _MISSING = object()
 
@@ -32,7 +32,11 @@ class PipelineContext:
         _variables: Read-only access to the internal variables dictionary.
     """
 
-    def __init__(self, initial_vars: Optional[Dict[str, Any]] = None, memory_config: Optional[MemoryConfig] = None):
+    def __init__(
+        self,
+        initial_vars: Optional[Dict[str, Any]] = None,
+        memory_config: Optional[MemoryConfig] = None,
+    ):
         """Initialize the pipeline context.
 
         Args:
@@ -164,7 +168,9 @@ class PipelineContext:
                 cleared_count += 1
         return cleared_count
 
-    def auto_clear_unused_variables(self, required_by_map: Dict[str, Set[str]], completed_stages: Set[str]) -> int:
+    def auto_clear_unused_variables(
+        self, required_by_map: Dict[str, Set[str]], completed_stages: Set[str]
+    ) -> int:
         """
         Automatically clear variables that are no longer needed.
 

@@ -18,9 +18,9 @@ from typing import Any, Dict, Literal
 import numpy as np
 import pandas as pd
 
-from src.core.csv import read_csv, write_csv
-from src.core.file import read_file, write_file
-from src.core.json import read_json, write_json
+from ..core.csv import read_csv, write_csv
+from ..core.file import read_file, write_file
+from ..core.json import read_json, write_json
 
 
 class DataSource(ABC):

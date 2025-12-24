@@ -8,7 +8,7 @@ conditionally executed based on runtime state, configuration, or previous result
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional
 
-from src.pipeline.context import PipelineContext
+from .context import PipelineContext
 
 
 class StageCondition(ABC):
@@ -198,7 +198,9 @@ class CustomCondition(StageCondition):
     """
 
     def __init__(
-        self, condition_fn: Callable[[PipelineContext, str], bool], skip_reason: str = "Custom condition not met"
+        self,
+        condition_fn: Callable[[PipelineContext, str], bool],
+        skip_reason: str = "Custom condition not met",
     ):
         self.condition_fn = condition_fn
         self.skip_reason = skip_reason

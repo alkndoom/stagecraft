@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from src.pipeline.pipeline_metadata import PipelineMetadata
-from src.pipeline.stages import ETLStage
+from .pipeline_metadata import PipelineMetadata
+from .stages import ETLStage
 
 
 class PipelineDefinition:
@@ -48,12 +48,13 @@ class PipelineDefinition:
         True
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, stages: Optional[List[ETLStage]] = None):
         """Initialize a new pipeline definition.
 
         Args:
             name: A descriptive name for the pipeline. Used for logging,
                  error messages, and metadata tracking.
+            stages: Optional list of ETL stages to initialize the pipeline with.
 
         Example:
             >>> pipeline = PipelineDefinition("transaction_classification")
@@ -62,6 +63,10 @@ class PipelineDefinition:
         """
         self.name = name
         self.stages: List[ETLStage] = []
+
+        if stages:
+            for stage in stages:
+                self.add_stage(stage)
 
     def add_stage(self, stage: ETLStage) -> PipelineDefinition:
         """Add a stage to the pipeline with validation.
@@ -163,9 +168,7 @@ class PipelineDefinition:
         self.__validate_dependencies(initial_context)
         return True
 
-    def __validate_dependencies(
-        self, initial_context: Optional[Dict[str, Any]] = None
-    ) -> bool:
+    def __validate_dependencies(self, initial_context: Optional[Dict[str, Any]] = None) -> bool:
         """Validate that each stage's input dependencies can be satisfied.
 
         This internal method performs a sequential walk through all stages,

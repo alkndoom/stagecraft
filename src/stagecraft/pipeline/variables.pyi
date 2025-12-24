@@ -4,9 +4,9 @@ import numpy as np
 import pandera.pandas as pa
 from pandera.typing import DataFrame
 
-from src.pipeline.context import PipelineContext
-from src.pipeline.data_source import ArraySource, CSVSource, DataSource
-from src.pipeline.markers import IOMarker
+from .context import PipelineContext
+from .data_source import ArraySource, CSVSource, DataSource
+from .markers import IOMarker
 
 _T = TypeVar("_T")
 _SCHEMA = TypeVar("_SCHEMA", bound=pa.DataFrameModel)

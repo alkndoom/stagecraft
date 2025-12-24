@@ -1,10 +1,10 @@
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 from .core.csv import append_csv, read_csv, write_csv
 from .core.exceptions import AppException, CriticalException
 from .core.file import append_file, read_file, write_file
 from .core.json import append_json, read_json, write_json
-from .core.logging import LoggingManager, LoggingManagerConfig
+from .core.logging import LoggingManager, LoggingManagerConfig, setup_logger
 from .core.os import get_dated_filename, get_files, get_folders, get_unique_filename
 from .core.str import (
     anti_capitalize,
@@ -55,6 +55,7 @@ __all__ = [
     "write_json",
     "LoggingManager",
     "LoggingManagerConfig",
+    "setup_logger",
     "get_dated_filename",
     "get_files",
     "get_folders",

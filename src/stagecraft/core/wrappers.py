@@ -1,7 +1,7 @@
 import functools
 import logging
 
-from src.core.exceptions import AppException, CriticalException
+from .exceptions import AppException, CriticalException
 
 logger = logging.getLogger(__name__)
 

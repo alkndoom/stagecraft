@@ -4,8 +4,8 @@ from typing import Any, List, Optional
 
 from pydantic import Field
 
-from src.core.exceptions import AppException
-from src.core.serializable import Serializable
+from ..core.exceptions import AppException
+from ..core.serializable import Serializable
 
 
 class ExecutionStatus(Enum):

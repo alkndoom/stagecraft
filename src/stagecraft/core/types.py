@@ -1,7 +1,6 @@
-from typing import TypeAlias
-
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TypeAlias
 
 NDArrayStr: TypeAlias = NDArray[np.str_]
 NDArrayBool: TypeAlias = NDArray[np.bool]

@@ -14,9 +14,7 @@ def read_csv(
     index_col: Optional[int] = None,
     **kwargs,
 ) -> pd.DataFrame:
-    return pd.read_csv(
-        filename, sep=sep, encoding=encoding, index_col=index_col, **kwargs
-    )
+    return pd.read_csv(filename, sep=sep, encoding=encoding, index_col=index_col, **kwargs)
 
 
 def write_csv(

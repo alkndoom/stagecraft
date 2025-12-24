@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 
 class _ANSIColors(Enum):
@@ -105,10 +107,7 @@ class _ColoredConsoleFormatter(logging.Formatter):
         datefmt: Optional[str] = None,
         utc: bool = False,
     ) -> None:
-        fmt = (
-            fmt
-            or "%(asctime)s.%(msecs)03d    [ %(levelname)s ] [ %(name)s ] %(message)s"
-        )
+        fmt = fmt or "%(asctime)s.%(msecs)03d [ %(levelname)s ] %(message)s [ %(name)s ]"
         datefmt = datefmt or "%Y-%m-%d %H:%M:%S"
         super().__init__(fmt=fmt, datefmt=datefmt)
 
@@ -118,7 +117,31 @@ class _ColoredConsoleFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         log_color = self.COLORS.get(record.levelno, _ANSIColors.DEFAULT)
         formatted = super().format(record)
+
+        if " [ " in formatted and formatted.endswith(" ]"):
+            # Find the last occurrence of " [ "
+            last_bracket_idx = formatted.rfind(" [ ")
+            colored_part = formatted[:last_bracket_idx]
+            name_part = formatted[last_bracket_idx:]
+
+            return f"{log_color.value}{colored_part}{_ANSIColors.END.value}{name_part}"
         return f"{log_color.value}{formatted}{_ANSIColors.END.value}"
+
+
+class _SimpleConsoleFormatter(logging.Formatter):
+    def __init__(
+        self,
+        fmt: Optional[str] = None,
+        *,
+        datefmt: Optional[str] = None,
+        utc: bool = False,
+    ) -> None:
+        fmt = fmt or "%(asctime)s.%(msecs)03d [ %(levelname)s ] %(message)s [ %(name)s ]"
+        datefmt = datefmt or "%Y-%m-%d %H:%M:%S"
+        super().__init__(fmt=fmt, datefmt=datefmt)
+
+        if utc:
+            self.converter = lambda *args: datetime.now(timezone.utc).timetuple()
 
 
 class LoggingManager:
@@ -128,84 +151,122 @@ class LoggingManager:
       2) Timestamped log file (real-time, appended on each record)
     """
 
-    def __init__(self, config: LoggingManagerConfig) -> None:
-        self.config = config
-        self._configured = False
-        self._log_file_path: Optional[Path] = None
+    _instance: Optional[LoggingManager] = None
+    _lock = threading.Lock()
+    _initialized = False
+    _configured = False
 
-        self._orig_stdout = None
-        self._orig_stderr = None
-        self._stdout_proxy: Optional[_StreamToLogger] = None
-        self._stderr_proxy: Optional[_StreamToLogger] = None
+    def __new__(cls) -> LoggingManager:
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
 
-    def configure(self) -> logging.Logger:
-        """
-        Call once at program start.
-        Returns the configured root logger.
-        """
+    def __init__(self) -> None:
+        if self._initialized:
+            return
 
+        with self._lock:
+            if self._initialized:
+                return
+
+            self.config = LoggingManagerConfig()
+
+            self._run_time: Optional[datetime] = None
+            self._run_timestamp: Optional[str] = None
+            self._log_file_path: Optional[Path] = None
+            self._logger: Optional[logging.Logger] = None
+            self._console_handler: Optional[logging.StreamHandler] = None
+            self._file_handler: Optional[logging.FileHandler] = None
+
+            self._orig_stdout: Optional[TextIO] = None
+            self._orig_stderr: Optional[TextIO] = None
+            self._stdout_proxy: Optional[_StreamToLogger] = None
+            self._stderr_proxy: Optional[_StreamToLogger] = None
+
+            atexit.register(self._cleanup)
+            self._initialized = True
+
+    @property
+    def run_time(self) -> Optional[datetime]:
+        return self._run_time
+
+    @property
+    def run_timestamp(self) -> Optional[str]:
+        return self._run_timestamp
+
+    @property
+    def log_file_path(self) -> Optional[Path]:
+        return self._log_file_path
+
+    def configure(self, config: Optional[LoggingManagerConfig] = None) -> None:
         if self._configured:
-            return logging.getLogger()
+            return
+        self.config = config or self.config
 
-        root = logging.getLogger()
-        root.setLevel(self.config.level)
+        self._run_time = (
+            datetime.now(timezone.utc) if self.config.utc_timestamps else datetime.now()
+        )
+        self._run_timestamp = self._run_time.strftime(self.config.filename_time_format)
+
+        self._logger = logging.getLogger()
+        self._logger.setLevel(self.config.level)
 
         # Remove existing handlers to avoid duplicates in re-runs.
-        for h in list(root.handlers):
-            root.removeHandler(h)
+        for h in list(self._logger.handlers):
+            self._logger.removeHandler(h)
 
         # Console handler
-        ch = logging.StreamHandler(stream=sys.stdout)
-        ch.setLevel(self.config.console_level or self.config.level)
+        self._console_handler = logging.StreamHandler(stream=sys.stdout)
+        self._console_handler.setLevel(self.config.console_level or self.config.level)
 
         console_formatter = _ColoredConsoleFormatter(
             self.config.log_format,
             datefmt=self.config.date_format,
             utc=self.config.utc_timestamps,
         )
-        ch.setFormatter(console_formatter)
+        self._console_handler.setFormatter(console_formatter)
 
         # File handler (writes continuously)
         self._log_file_path = self._make_log_path()
         self._log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         file_mode = "w" if self.config.overwrite else "a"
-        fh = logging.FileHandler(
+        self._file_handler = logging.FileHandler(
             self._log_file_path,
             mode=file_mode,
             encoding=self.config.encoding,
             delay=False,
         )
-        fh.setLevel(self.config.level)
-        fh.setFormatter(console_formatter)
+        self._file_handler.setLevel(self.config.level)
 
-        root.addHandler(ch)
-        root.addHandler(fh)
+        file_formatter = _SimpleConsoleFormatter(
+            self.config.log_format,
+            datefmt=self.config.date_format,
+            utc=self.config.utc_timestamps,
+        )
+        self._file_handler.setFormatter(file_formatter)
+
+        self._logger.addHandler(self._console_handler)
+        self._logger.addHandler(self._file_handler)
 
         # Optional capture of print() / raw writes
         if self.config.also_capture_stdout_stderr:
-            self._redirect_stdout_stderr(root)
+            self._redirect_stdout_stderr(self._logger)
 
         self._configured = True
-        return root
-
-    def get_log_file_path(self) -> Optional[Path]:
-        return self._log_file_path
 
     def _make_log_path(self) -> Path:
-        now = (
-            datetime.now(timezone.utc) if self.config.utc_timestamps else datetime.now()
-        )
-        stamp = now.strftime(self.config.filename_time_format)
         prefix = self.config.filename_prefix or self.config.app_name
-        filename = f"{prefix}_{stamp}.log"
+        filename = f"{prefix}_{self._run_timestamp}.log"
         path = self.config.log_dir / filename
 
         # Very rare collision; resolve unless overwrite=True.
         if not self.config.overwrite and path.exists():
             suffix = 1
             while True:
-                candidate = self.config.log_dir / f"{prefix}_{stamp}_{suffix}.log"
+                candidate = self.config.log_dir / f"{prefix}_{self._run_timestamp}_{suffix}.log"
                 if not candidate.exists():
                     return candidate
                 suffix += 1
@@ -227,6 +288,16 @@ class LoggingManager:
 
         sys.stdout = self._stdout_proxy  # type: ignore[assignment]
         sys.stderr = self._stderr_proxy  # type: ignore[assignment]
+
+    def _cleanup(self) -> None:
+        if self._console_handler:
+            self._console_handler.close()
+        if self._file_handler:
+            self._file_handler.close()
+        if self._logger:
+            for handler in self._logger.handlers[:]:
+                handler.close()
+                self._logger.removeHandler(handler)
 
 
 class _StreamToLogger:
@@ -254,3 +325,9 @@ class _StreamToLogger:
         if self._buf.strip():
             self.logger.log(self.level, self._buf.rstrip("\n"))
         self._buf = ""
+
+
+def setup_logger(config: Optional[LoggingManagerConfig] = None) -> LoggingManager:
+    manager = LoggingManager()
+    manager.configure(config)
+    return manager

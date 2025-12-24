@@ -42,16 +42,16 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Callable, Generic, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, Iterable, List, Optional, Type, TypeVar
 
 import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 from pandera.typing import DataFrame
 
-from src.pipeline.context import PipelineContext
-from src.pipeline.data_source import ArraySource, CSVSource, DataSource
-from src.pipeline.markers import IOMarker
+from .context import PipelineContext
+from .data_source import ArraySource, CSVSource, DataSource
+from .markers import IOMarker
 
 if TYPE_CHECKING:
     pass
@@ -121,9 +121,7 @@ class SVar(Generic[_T]):
         Raises:
             AssertionError: If both factory and default are provided.
         """
-        assert not (
-            factory and default
-        ), "Only one of factory or default can be provided"
+        assert not (factory and default), "Only one of factory or default can be provided"
         self.factory = factory
         self.default = default
         self.type = type_
@@ -169,7 +167,13 @@ class SVar(Generic[_T]):
             It should not be called manually.
         """
         self.name = name
-        self.type = self.type or owner.__annotations__[name] or type(_T)
+
+        # Ensure __annotations__ exists
+        if not hasattr(owner, "__annotations__"):
+            owner.__annotations__ = {}
+
+        # Infer type from annotations if not explicitly provided
+        self.type = self.type or owner.__annotations__.get(name) or type(_T)
         owner.__annotations__[name] = self.type
 
         if not hasattr(owner, "_pending_variables"):
@@ -266,11 +270,7 @@ class SVar(Generic[_T]):
 
             if hasattr(self, "context") and self.context:
                 self.context.set(self.name, self.value)
-            if (
-                self.value is not None
-                and self.source is not None
-                and self.source.save_enabled
-            ):
+            if self.value is not None and self.source is not None and self.source.save_enabled:
                 self.source.save(self.value)
         except Exception as e:
             raise RuntimeError(
@@ -317,9 +317,7 @@ class SVar(Generic[_T]):
             TypeError: If the value doesn't match the expected type
         """
         if not hasattr(self, "name"):
-            raise ValueError(
-                "Variable name is not set. Cannot validate unnamed variable."
-            )
+            raise ValueError("Variable name is not set. Cannot validate unnamed variable.")
 
         if self.type is None or self.value is None:
             return True
@@ -560,9 +558,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
         default: Optional[DataFrame[_SCHEMA]] = None,
         source: Optional[CSVSource] = None,
         description: Optional[str] = None,
-        pre_processing: Optional[
-            Callable[[DataFrame[_SCHEMA]], DataFrame[_SCHEMA]]
-        ] = None,
+        pre_processing: Optional[Callable[[DataFrame[_SCHEMA]], DataFrame[_SCHEMA]]] = None,
         markers: Optional[List[IOMarker]] = None,
     ):
         """Initialize a DataFrame variable with optional schema validation.
@@ -728,7 +724,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
                 ) from e
         return True
 
-    def iter_chunks(self, chunk_size: int):
+    def iter_chunks(self, chunk_size: int) -> Iterable[DataFrame[_SCHEMA]]:
         """Iterate over the DataFrame in chunks for memory-efficient processing.
 
         This generator yields consecutive chunks of the DataFrame, allowing
@@ -772,7 +768,8 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
         total_rows = len(self.value)
         for start_idx in range(0, total_rows, chunk_size):
             end_idx = min(start_idx + chunk_size, total_rows)
-            yield self.value.iloc[start_idx:end_idx]
+            # .iloc[] returns type Series[Any] because of an error in pandas stubs
+            yield self.value.iloc[start_idx:end_idx]  # type: ignore
 
     def process_in_chunks(
         self,
@@ -840,9 +837,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
             )
 
         if process_fn is None:
-            raise ValueError(
-                "process_fn cannot be None. Provide a function to process each chunk."
-            )
+            raise ValueError("process_fn cannot be None. Provide a function to process each chunk.")
 
         if self.value is None:
             return None

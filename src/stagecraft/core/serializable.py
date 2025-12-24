@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, Type, TypeVar
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
-from src.core.str import snake_to_camel_case
+from .str import snake_to_camel_case
 
 if TYPE_CHECKING:
     pass

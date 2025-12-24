@@ -196,10 +196,7 @@ class MemoryTracker:
         elif isinstance(obj, (list, tuple)):
             return sum(self.get_object_size(item) for item in obj)
         elif isinstance(obj, dict):
-            return sum(
-                self.get_object_size(k) + self.get_object_size(v)
-                for k, v in obj.items()
-            )
+            return sum(self.get_object_size(k) + self.get_object_size(v) for k, v in obj.items())
         else:
             return sys.getsizeof(obj)
 
@@ -251,9 +248,7 @@ class MemoryTracker:
 
         self._variable_sizes[name] = size_bytes
 
-        info = VariableMemoryInfo(
-            name=name, size_bytes=size_bytes, type_name=type(value).__name__
-        )
+        info = VariableMemoryInfo(name=name, size_bytes=size_bytes, type_name=type(value).__name__)
 
         if self.config.log_memory_usage:
             logger.info(f"Variable '{name}' ({info.type_name}): {info.size_mb:.2f} MB")
@@ -398,9 +393,7 @@ class MemoryTracker:
 
         if self._variable_sizes:
             logger.info("  Top 5 largest variables:")
-            sorted_vars = sorted(
-                self._variable_sizes.items(), key=lambda x: x[1], reverse=True
-            )[:5]
+            sorted_vars = sorted(self._variable_sizes.items(), key=lambda x: x[1], reverse=True)[:5]
             for name, size_bytes in sorted_vars:
                 size_mb = size_bytes / (1024 * 1024)
                 logger.info(f"    - {name}: {size_mb:.2f} MB")
@@ -563,8 +556,7 @@ class MemoryManager:
             return True
         except Exception as e:
             raise RuntimeError(
-                f"Failed to clear variable '{var_name}' from memory.\n"
-                f"Original error: {str(e)}"
+                f"Failed to clear variable '{var_name}' from memory.\n" f"Original error: {str(e)}"
             ) from e
 
     def get_summary(self) -> Dict[str, Any]:

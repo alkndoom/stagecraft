@@ -32,12 +32,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-from src.core.wrappers import handle_exceptions
-from src.pipeline.conditions import AlwaysExecute, StageCondition
-from src.pipeline.context import PipelineContext
-from src.pipeline.markers import IOMarker
-from src.pipeline.pipeline_metadata import StageMetadata, StageParameter
-from src.pipeline.variables import SVar
+from ..core.wrappers import handle_exceptions
+from .conditions import AlwaysExecute, StageCondition
+from .context import PipelineContext
+from .markers import IOMarker
+from .pipeline_metadata import StageMetadata, StageParameter
+from .variables import SVar
 
 
 class ETLStage(ABC):
@@ -523,9 +523,7 @@ class ETLStage(ABC):
         """
         if item in self._dynamic_props:
             return self._dynamic_props[item]["getter"]()
-        raise AttributeError(
-            f"{type(self).__name__!r} object has no attribute {item!r}"
-        )
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {item!r}")
 
     def __setattr__(self, key, value):
         """Enable dynamic property setting for stage variables.
@@ -546,9 +544,7 @@ class ETLStage(ABC):
             >>> # Setting output_data triggers __setattr__
             >>> stage.output_data = df  # Calls SVar.set()
         """
-        if "_dynamic_props" in self.__dict__ and key in self.__dict__.get(
-            "_dynamic_props", {}
-        ):
+        if "_dynamic_props" in self.__dict__ and key in self.__dict__.get("_dynamic_props", {}):
             return self._dynamic_props[key]["setter"](value)
         super().__setattr__(key, value)
 

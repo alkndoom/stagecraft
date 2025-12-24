@@ -24,8 +24,8 @@ Example:
 
 from typing import Optional, Type, Union
 
-from src.pipeline.markers import IOMarker
-from src.pipeline.variables import _T, SVar
+from .markers import IOMarker
+from .variables import _T, SVar
 
 
 def sconsume(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:

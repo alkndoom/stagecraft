@@ -2,7 +2,7 @@ from typing import Any, Type, overload
 
 from pandera.typing import DataFrame
 
-from src.pipeline.variables import _SCHEMA, _T, DFVar, SVar
+from .variables import _SCHEMA, _T, DFVar, SVar
 
 @overload
 def sconsume(var: SVar[_T], /) -> _T: ...

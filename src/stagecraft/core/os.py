@@ -3,7 +3,9 @@ from datetime import datetime
 from typing import List, Optional
 
 
-def get_dated_filename(file_path, suffix: str = "", sep: str = "_", format: str = "%Y%m%d%H%M%S") -> str:
+def get_dated_filename(
+    file_path, suffix: str = "", sep: str = "_", format: str = "%Y%m%d%H%M%S"
+) -> str:
     base, ext = os.path.splitext(file_path)
     file_path = f"{base}{sep}{datetime.now().strftime(format)}{sep}{suffix}{ext}"
     return file_path
