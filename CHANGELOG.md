@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-26
+
+### Changed
+
+- Updated module to make Serializable class and DataFrame, NDArray, NDArrayStr, NDArrayBool, NDArrayInt8, NDArrayInt16, NDArrayInt32, NDArrayInt64, NDArrayInt, NDArrayFloat32, NDArrayFloat64, NDArrayFloat types publicly available.
+
 ## [0.1.3] - 2025-12-24
 
 ### Changed
@@ -63,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.9+ support
 - Apache-2.0 license
 
+[0.1.4]: https://github.com/alkndoom/stagecraft/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/alkndoom/stagecraft/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/alkndoom/stagecraft/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/alkndoom/stagecraft/compare/v0.1.0...v0.1.1

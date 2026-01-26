@@ -1,5 +1,6 @@
 import numpy as np
 from numpy.typing import NDArray
+from pandera.typing import DataFrame
 from typing_extensions import TypeAlias
 
 NDArrayStr: TypeAlias = NDArray[np.str_]
@@ -17,6 +18,7 @@ NDArrayFloat: TypeAlias = NDArrayFloat64
 
 
 __all__ = [
+    "DataFrame",
     "NDArray",
     "NDArrayStr",
     "NDArrayBool",

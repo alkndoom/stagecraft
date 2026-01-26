@@ -6,6 +6,7 @@ from .core.file import append_file, read_file, write_file
 from .core.json import append_json, read_json, write_json
 from .core.logging import LoggingManager, LoggingManagerConfig, setup_logger
 from .core.os import get_dated_filename, get_files, get_folders, get_unique_filename
+from .core.serializable import Serializable
 from .core.str import (
     anti_capitalize,
     camel_to_snake_case,
@@ -18,6 +19,20 @@ from .core.str import (
     spaced_to_camel,
 )
 from .core.time import get_current_date, get_timestamp
+from .core.types import (
+    DataFrame,
+    NDArray,
+    NDArrayBool,
+    NDArrayFloat,
+    NDArrayFloat32,
+    NDArrayFloat64,
+    NDArrayInt,
+    NDArrayInt8,
+    NDArrayInt16,
+    NDArrayInt32,
+    NDArrayInt64,
+    NDArrayStr,
+)
 from .core.web import get_curl
 from .core.wrappers import handle_exceptions, nullable
 from .pipeline.conditions import (
@@ -60,6 +75,7 @@ __all__ = [
     "get_files",
     "get_folders",
     "get_unique_filename",
+    "Serializable",
     "anti_capitalize",
     "camel_to_snake_case",
     "camel_to_spaced",
@@ -71,9 +87,21 @@ __all__ = [
     "spaced_to_camel",
     "get_current_date",
     "get_timestamp",
+    "DataFrame",
+    "NDArray",
+    "NDArrayStr",
+    "NDArrayBool",
+    "NDArrayInt8",
+    "NDArrayInt16",
+    "NDArrayInt32",
+    "NDArrayInt64",
+    "NDArrayInt",
+    "NDArrayFloat32",
+    "NDArrayFloat64",
+    "NDArrayFloat",
+    "get_curl",
     "handle_exceptions",
     "nullable",
-    "get_curl",
     "CSVSource",
     "DataSource",
     "FileSource",
