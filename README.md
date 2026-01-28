@@ -42,9 +42,19 @@ pipeline = PipelineDefinition(
 )
 
 # Run the pipeline
-runner = PipelineRunner(pipeline)
-result = runner.run()
+runner = PipelineRunner()
+result = runner.run(pipeline)
 ```
+
+## Examples
+
+Check out the [examples/](examples/) directory for comprehensive, runnable examples:
+
+- **[basic_pipeline.py](examples/basic_pipeline.py)** - Simple end-to-end pipeline with CSV loading, transformation, and saving
+- **[dataframe_pipeline.py](examples/dataframe_pipeline.py)** - DataFrame operations with Pandera schema validation
+- **[conditional_execution.py](examples/conditional_execution.py)** - Conditional stage execution with various condition types
+
+Each example is self-contained and demonstrates best practices. See the [examples/README.md](examples/README.md) for detailed documentation.
 
 ## Core Components
 

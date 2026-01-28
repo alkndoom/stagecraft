@@ -1,8 +1,15 @@
+from typing import TypeVar
+
 import numpy as np
 from numpy.typing import NDArray
 from pandera.typing import DataFrame
 from typing_extensions import TypeAlias
 
+T = TypeVar("T")
+
+PaDataFrame: TypeAlias = DataFrame[T]
+
+NDArrayGen: TypeAlias = NDArray[np.generic]
 NDArrayStr: TypeAlias = NDArray[np.str_]
 NDArrayBool: TypeAlias = NDArray[np.bool]
 
@@ -18,8 +25,8 @@ NDArrayFloat: TypeAlias = NDArrayFloat64
 
 
 __all__ = [
-    "DataFrame",
-    "NDArray",
+    "PaDataFrame",
+    "NDArrayGen",
     "NDArrayStr",
     "NDArrayBool",
     "NDArrayInt8",

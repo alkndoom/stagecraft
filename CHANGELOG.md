@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-01-28
+
+### Added
+
+- Added pyarrow to dependencies
+- Added examples folder
+- Added AutoDataClass and autodataclass to easily create dataclasses with slots and frozen=True by default
+- Added custom PaConfig class to configure pandera validation
+- Added PaDataFrameModel class to easily create pandera DataFrame models
+- Added PaDataFrame and NDArrayGen type aliases for pandera DataFrame and numpy generic array types
+- Added DFVarSchema class to define schema for DFVar using pandera
+- Added optimized and vectorized to_dict and to_dataframe methods to DFVarSchema to easily convert between dataclasses and pandas DataFrames
+- Added detailed difference information when DFVarSchema validation fails
+
+### Removed
+
+- Removed DataFrame and NDArray types from public API
+- Removed Python 3.9 support
+
 ## [0.1.4] - 2026-01-26
 
 ### Changed
@@ -69,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.9+ support
 - Apache-2.0 license
 
+[0.1.5]: https://github.com/alkndoom/stagecraft/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/alkndoom/stagecraft/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/alkndoom/stagecraft/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/alkndoom/stagecraft/compare/v0.1.1...v0.1.2

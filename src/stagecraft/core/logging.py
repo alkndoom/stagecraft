@@ -4,11 +4,12 @@ import atexit
 import logging
 import sys
 import threading
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional, TextIO
+
+from .dataclass import AutoDataClass, autodataclass
 
 
 class _ANSIColors(Enum):
@@ -69,8 +70,8 @@ class _ANSIColors(Enum):
     END = "\033[0m"
 
 
-@dataclass(frozen=True)
-class LoggingManagerConfig:
+@autodataclass
+class LoggingManagerConfig(AutoDataClass):
     app_name: str = "app"
     log_dir: Path = Path("logs")
     level: int = logging.INFO

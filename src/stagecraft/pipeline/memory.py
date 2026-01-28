@@ -26,17 +26,18 @@ Example:
 import gc
 import logging
 import sys
-from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set
 
 import numpy as np
 import pandas as pd
 
+from ..core.dataclass import AutoDataClass, autodataclass
+
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class MemoryConfig:
+@autodataclass
+class MemoryConfig(AutoDataClass):
     """Configuration for memory tracking and management.
 
     This dataclass defines the behavior of the memory management system,
@@ -78,8 +79,8 @@ class MemoryConfig:
     log_memory_usage: bool = True
 
 
-@dataclass
-class VariableMemoryInfo:
+@autodataclass
+class VariableMemoryInfo(AutoDataClass):
     """Information about a variable's memory usage.
 
     This dataclass encapsulates metadata about a tracked variable's memory

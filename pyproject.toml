@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stagecraft"
-version = "0.1.4"
+version = "0.1.5"
 description = "A Python library for building robust ETL pipelines with declarative stages and data flow management"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "alkndoom", email = "developer@ivent.app" }]
 keywords = [
@@ -22,7 +22,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,7 +29,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
-dependencies = ["pandas>=2.0.0", "numpy>=1.24.0", "pandera>=0.17.0"]
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "pandera>=0.17.0",
+    "pyarrow>=11.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -53,14 +57,14 @@ package-dir = { "" = "src" }
 
 [tool.black]
 line-length = 100
-target-version = ['py39', 'py310', 'py311', 'py312']
+target-version = ['py310', 'py311', 'py312']
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false

@@ -13,7 +13,7 @@ between pipeline stages. Variables handle:
 The module includes three main variable types:
 
 1. **SVar**: Generic stage variable for any Python type
-2. **DFVar**: Specialized variable for pandas DataFrames with Pandera schema support
+2. **DFVar**: Specialized variable for pandas DataFrames with DFVarSchema (Pandera) support
 3. **NDArrayVar**: Specialized variable for NumPy arrays with shape validation
 
 Variables are typically declared using descriptor functions (sconsume, sproduce,
@@ -46,9 +46,10 @@ from typing import TYPE_CHECKING, Callable, Generic, Iterable, List, Optional, T
 
 import numpy as np
 import pandas as pd
-import pandera.pandas as pa
 from pandera.typing import DataFrame
 
+from ..core.pandera import PaDataFrameModel
+from ..pipeline.schemas import DFVarSchema
 from .context import PipelineContext
 from .data_source import ArraySource, CSVSource, DataSource
 from .markers import IOMarker
@@ -57,7 +58,7 @@ if TYPE_CHECKING:
     pass
 
 _T = TypeVar("_T")
-_SCHEMA = TypeVar("_SCHEMA", bound=pa.DataFrameModel)
+_SCHEMA = TypeVar("_SCHEMA", bound=Type[DFVarSchema])
 
 
 logger = logging.getLogger(__name__)
@@ -505,11 +506,51 @@ class SVar(Generic[_T]):
         return self.value.__repr__()
 
 
+def _diff_schema(schema_model: Type[PaDataFrameModel], df: pd.DataFrame) -> str:
+    expected_cols = set(schema_model.__annotations__.keys())
+    actual_cols = set(df.columns)
+
+    missing = expected_cols - actual_cols
+    extra = actual_cols - expected_cols
+
+    lines: list[str] = []
+
+    if missing:
+        lines.append("Missing columns:")
+        for c in sorted(missing):
+            lines.append(f"  - {c}")
+
+    if extra:
+        lines.append("Unexpected columns:")
+        for c in sorted(extra):
+            lines.append(f"  - {c}")
+
+    # dtype mismatches
+    mismatches = []
+    for col in expected_cols & actual_cols:
+        expected = schema_model.__annotations__[col]
+        expected_type = expected.__args__[0]  # Series[T] → T
+        actual_dtype = df[col].dtype
+
+        try:
+            pandas_expected = pd.Series([], dtype=expected_type).dtype
+            if actual_dtype != pandas_expected:
+                mismatches.append(f"  - {col}: expected {pandas_expected}, got {actual_dtype}")
+        except Exception:
+            pass
+
+    if mismatches:
+        lines.append("Type mismatches:")
+        lines.extend(mismatches)
+
+    return "\n".join(lines)
+
+
 class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
-    """DataFrame variable with Pandera schema validation and type safety.
+    """DataFrame variable with DFVarSchema (Pandera) validation and type safety.
 
     DFVar extends SVar to provide specialized handling for pandas DataFrames with
-    Pandera schema support. It enables:
+    DFVarSchema (Pandera) support. It enables:
 
     - Type-safe DataFrame operations with IDE autocomplete for columns
     - Runtime schema validation with automatic type coercion
@@ -517,7 +558,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
     - Memory-efficient chunk processing for large DataFrames
     - CSV file integration for loading/saving
 
-    The schema parameter accepts a Pandera DataFrameModel class, which provides:
+    The schema parameter accepts a DFVarSchema class, which provides:
     - Column name and type definitions
     - Validation rules (nullable, unique, ranges, etc.)
     - Automatic type coercion during validation
@@ -526,12 +567,12 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
     Stands for 'DataFrame Variable'.
 
     Attributes:
-        schema: Pandera DataFrameModel class for runtime validation and type safety.
+        schema: DFVarSchema class for runtime validation and type safety.
         value: The current DataFrame value.
         columns: List of column names (property).
 
     Example:
-        >>> class MySchema(pa.DataFrameModel):
+        >>> class MySchema(DFVarSchema):
         ...     customer_id: int
         ...     amount: float = pa.Field(ge=0)
         ...     date: pd.Timestamp
@@ -564,7 +605,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
         """Initialize a DataFrame variable with optional schema validation.
 
         Args:
-            schema: Optional Pandera DataFrameModel class for runtime validation.
+            schema: Optional DFVarSchema class for runtime validation.
                    If provided, the DataFrame will be validated against this schema
                    whenever validate() is called.
             factory: Optional callable that produces a new DataFrame instance.
@@ -665,7 +706,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
 
         This method performs two levels of validation:
         1. Type validation: Ensures the value is a pandas DataFrame
-        2. Schema validation: If a Pandera schema is provided, validates the
+        2. Schema validation: If a DFVarSchema is provided, validates the
            DataFrame structure, column types, and any defined constraints
 
         The schema validation also performs automatic type coercion when possible,
@@ -677,11 +718,11 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
         Raises:
             ValueError: If the variable has no name.
             TypeError: If the value is not a pandas DataFrame.
-            ValueError: If Pandera schema validation fails. The error message
+            ValueError: If DFVarSchema (Pandera) validation fails. The error message
                        includes details about which columns or constraints failed.
 
         Example:
-            >>> class MySchema(pa.DataFrameModel):
+            >>> class MySchema(DFVarSchema):
             ...     id: int
             ...     value: float = pa.Field(ge=0)
             ...
@@ -691,7 +732,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
             True
             >>> var.value = pd.DataFrame({'id': [1, 2], 'value': [-5, 10]})
             >>> var.validate()  # Raises ValueError: value must be >= 0
-            ValueError: Pandera schema validation failed...
+            ValueError: DFVarSchema (Pandera) validation failed...
 
         Note:
             If no schema is provided, only basic DataFrame type checking is performed.
@@ -713,13 +754,15 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
 
         if self.schema is not None:
             try:
-                validated_df = self.schema.validate(self.value, lazy=False)
+                validated_df = self.schema.M.validate(self.value, lazy=False)
                 object.__setattr__(self, "value", validated_df)
                 return True
             except Exception as e:
+                diff = _diff_schema(self.schema.M, self.value)
                 raise ValueError(
-                    f"Pandera schema validation failed for DataFrame '{self.name}'. "
+                    f"DFVarSchema (Pandera) validation failed for DataFrame '{self.name}'. "
                     f"Check that the DataFrame has the correct columns and types.\n"
+                    f"Schema differences:\n{diff}\n\n"
                     f"Original error: {str(e)}"
                 ) from e
         return True
@@ -1023,13 +1066,4 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
                 f"Expected: {self.shape}, Got: {self.value.shape}"
             )
 
-        return True
-        return True
-        return True
-        return True
-        return True
-        return True
-        return True
-        return True
-        return True
         return True

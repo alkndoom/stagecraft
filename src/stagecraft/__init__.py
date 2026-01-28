@@ -1,11 +1,13 @@
-__version__ = "0.1.3"
+__version__ = "0.1.5"
 
 from .core.csv import append_csv, read_csv, write_csv
+from .core.dataclass import AutoDataClass, autodataclass
 from .core.exceptions import AppException, CriticalException
 from .core.file import append_file, read_file, write_file
 from .core.json import append_json, read_json, write_json
 from .core.logging import LoggingManager, LoggingManagerConfig, setup_logger
 from .core.os import get_dated_filename, get_files, get_folders, get_unique_filename
+from .core.pandera import PaConfig, PaDataFrameModel, pafield
 from .core.serializable import Serializable
 from .core.str import (
     anti_capitalize,
@@ -20,8 +22,6 @@ from .core.str import (
 )
 from .core.time import get_current_date, get_timestamp
 from .core.types import (
-    DataFrame,
-    NDArray,
     NDArrayBool,
     NDArrayFloat,
     NDArrayFloat32,
@@ -32,6 +32,7 @@ from .core.types import (
     NDArrayInt32,
     NDArrayInt64,
     NDArrayStr,
+    PaDataFrame,
 )
 from .core.web import get_curl
 from .core.wrappers import handle_exceptions, nullable
@@ -49,9 +50,19 @@ from .pipeline.context import PipelineContext
 from .pipeline.data_source import CSVSource, DataSource, FileSource, JSONSource
 from .pipeline.definition import PipelineDefinition
 from .pipeline.descriptors import sconsume, sproduce, stransform
+from .pipeline.markers import IOMarker
 from .pipeline.memory import MemoryConfig, MemoryManager, MemoryTracker, VariableMemoryInfo
-from .pipeline.pipeline_metadata import PipelineMetadata
+from .pipeline.pipeline_metadata import (
+    ExecutionStatus,
+    PipelineExecutionMetadata,
+    PipelineMetadata,
+    PipelineResult,
+    StageExecutionMetadata,
+    StageMetadata,
+    StageParameter,
+)
 from .pipeline.runner import PipelineRunner
+from .pipeline.schemas import DFVarSchema
 from .pipeline.stages import ETLStage
 from .pipeline.variables import DFVar, NDArrayVar, SVar
 
@@ -60,6 +71,8 @@ __all__ = [
     "append_csv",
     "read_csv",
     "write_csv",
+    "AutoDataClass",
+    "autodataclass",
     "AppException",
     "CriticalException",
     "append_file",
@@ -75,6 +88,9 @@ __all__ = [
     "get_files",
     "get_folders",
     "get_unique_filename",
+    "PaConfig",
+    "PaDataFrameModel",
+    "pafield",
     "Serializable",
     "anti_capitalize",
     "camel_to_snake_case",
@@ -87,8 +103,6 @@ __all__ = [
     "spaced_to_camel",
     "get_current_date",
     "get_timestamp",
-    "DataFrame",
-    "NDArray",
     "NDArrayStr",
     "NDArrayBool",
     "NDArrayInt8",
@@ -99,6 +113,7 @@ __all__ = [
     "NDArrayFloat32",
     "NDArrayFloat64",
     "NDArrayFloat",
+    "PaDataFrame",
     "get_curl",
     "handle_exceptions",
     "nullable",
@@ -110,6 +125,7 @@ __all__ = [
     "PipelineDefinition",
     "PipelineMetadata",
     "PipelineRunner",
+    "DFVarSchema",
     "ETLStage",
     "DFVar",
     "NDArrayVar",
@@ -117,10 +133,17 @@ __all__ = [
     "sconsume",
     "sproduce",
     "stransform",
+    "IOMarker",
     "MemoryConfig",
     "MemoryManager",
     "MemoryTracker",
     "VariableMemoryInfo",
+    "ExecutionStatus",
+    "PipelineExecutionMetadata",
+    "PipelineResult",
+    "StageExecutionMetadata",
+    "StageMetadata",
+    "StageParameter",
     "StageCondition",
     "AlwaysExecute",
     "InputNotEmptyCondition",

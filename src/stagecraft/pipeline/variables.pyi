@@ -1,15 +1,16 @@
 from typing import Callable, Generic, Iterable, List, Optional, Type, TypeVar, overload
 
 import numpy as np
-import pandera.pandas as pa
 from pandera.typing import DataFrame
+
+from stagecraft.pipeline.schemas import DFVarSchema
 
 from .context import PipelineContext
 from .data_source import ArraySource, CSVSource, DataSource
 from .markers import IOMarker
 
 _T = TypeVar("_T")
-_SCHEMA = TypeVar("_SCHEMA", bound=pa.DataFrameModel)
+_SCHEMA = TypeVar("_SCHEMA", bound=Type[DFVarSchema])
 
 class SVar(Generic[_T]):
     name: str
@@ -85,7 +86,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
     @overload
     def __init__(
         self,
-        schema: Optional[Type[_SCHEMA]] = None,
+        schema: Optional[_SCHEMA] = None,
         /,
         *,
         factory: Callable[[], DataFrame[_SCHEMA]],
@@ -97,7 +98,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
     @overload
     def __init__(
         self,
-        schema: Optional[Type[_SCHEMA]] = None,
+        schema: Optional[_SCHEMA] = None,
         /,
         *,
         default: DataFrame[_SCHEMA],
@@ -109,7 +110,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
     @overload
     def __init__(
         self,
-        schema: Type[_SCHEMA],
+        schema: _SCHEMA,
         /,
         *,
         source: Optional[CSVSource] = None,
