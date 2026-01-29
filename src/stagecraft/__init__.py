@@ -1,4 +1,4 @@
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 from .core.csv import append_csv, read_csv, write_csv
 from .core.dataclass import AutoDataClass, autodataclass
@@ -7,7 +7,7 @@ from .core.file import append_file, read_file, write_file
 from .core.json import append_json, read_json, write_json
 from .core.logging import LoggingManager, LoggingManagerConfig, setup_logger
 from .core.os import get_dated_filename, get_files, get_folders, get_unique_filename
-from .core.pandera import PaConfig, PaDataFrameModel, pafield
+from .core.pandera import PaConfig, PaDataFrame, PaDataFrameModel, pafield
 from .core.serializable import Serializable
 from .core.str import (
     anti_capitalize,
@@ -32,10 +32,9 @@ from .core.types import (
     NDArrayInt32,
     NDArrayInt64,
     NDArrayStr,
-    PaDataFrame,
 )
 from .core.web import get_curl
-from .core.wrappers import handle_exceptions, nullable
+from .core.wrappers import exceptional, nullable
 from .pipeline.conditions import (
     AlwaysExecute,
     AndCondition,
@@ -89,6 +88,7 @@ __all__ = [
     "get_folders",
     "get_unique_filename",
     "PaConfig",
+    "PaDataFrame",
     "PaDataFrameModel",
     "pafield",
     "Serializable",
@@ -113,9 +113,8 @@ __all__ = [
     "NDArrayFloat32",
     "NDArrayFloat64",
     "NDArrayFloat",
-    "PaDataFrame",
     "get_curl",
-    "handle_exceptions",
+    "exceptional",
     "nullable",
     "CSVSource",
     "DataSource",

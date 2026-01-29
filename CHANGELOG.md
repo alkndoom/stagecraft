@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-01-30
+
+### Added
+
+- Added documentation to src/stagecraft/core/dataclass.py
+- Added custom PaDataFrame class to easily create pandera DataFrame models and manipulate them in chunks
+- Added factory callables to source parameters to increase dynamicity
+
+### Changed
+
+- Renamed "@handle_exceptions" decorator to "@exceptional"
+- Combined "factory" and "default" parameters in SVar into "value", accepting both default and factory callables
+- Changed factory callables to accept the stage as a parameter, now it's possible to create variables with dynamic values based on the stage properties
+- Changed SVar to resolve the value only when the stage is set, fixing a bug where the value was resolved too early and the stage properties were not available yet
+
+### Removed
+
+- Removed unnecessary variables.pyi stub file
+
 ## [0.1.5] - 2026-01-28
 
 ### Added
@@ -88,6 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.9+ support
 - Apache-2.0 license
 
+[0.1.6]: https://github.com/alkndoom/stagecraft/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/alkndoom/stagecraft/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/alkndoom/stagecraft/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/alkndoom/stagecraft/compare/v0.1.2...v0.1.3

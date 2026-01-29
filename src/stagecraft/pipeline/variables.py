@@ -40,28 +40,46 @@ Example:
 
 from __future__ import annotations
 
-import copy
+import inspect
 import logging
-from typing import TYPE_CHECKING, Callable, Generic, Iterable, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import numpy as np
 import pandas as pd
-from pandera.typing import DataFrame
 
-from ..core.pandera import PaDataFrameModel
-from ..pipeline.schemas import DFVarSchema
+from ..core.pandera import PaDataFrame, PaDataFrameModel
 from .context import PipelineContext
 from .data_source import ArraySource, CSVSource, DataSource
 from .markers import IOMarker
+from .schemas import DFVarSchema
 
 if TYPE_CHECKING:
-    pass
+    from .stages import ETLStage
 
 _T = TypeVar("_T")
-_SCHEMA = TypeVar("_SCHEMA", bound=Type[DFVarSchema])
+_R = TypeVar("_R")
+_SCHEMA = TypeVar("_SCHEMA", bound=DFVarSchema)
 
+SValuable = Union[_R, Callable[[], _R], Callable[["ETLStage"], _R]]
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_svaluable(
+    value: Optional[SValuable[_T]],
+    stage: Optional["ETLStage"] = None,
+) -> Optional[_T]:
+    if value is None:
+        return None
+    if callable(value):
+        sig = inspect.signature(value)
+        if len(sig.parameters) == 0:
+            return value()  # type: ignore[return-value]
+        elif stage is None:
+            raise ValueError("Cannot resolve SValuable because stage parameter is None.")
+        else:
+            return value(stage)  # type: ignore[return-value]
+    return value
 
 
 class SVar(Generic[_T]):
@@ -77,10 +95,9 @@ class SVar(Generic[_T]):
 
     Attributes:
         value: The current value of the variable.
-        context: The pipeline context for loading/saving data (set by PipelineRunner).
+        stage: The ETLStage instance that owns this variable (set by ETLStage).
+        context: The pipeline context for loading/saving data, accessed through the stage (set by PipelineRunner).
         name: The variable name as defined on the stage class.
-        factory: Optional callable that produces new instances of the value.
-        default: Optional static default value.
         type: The expected type of the variable value.
         source: Optional data source for loading/saving the value.
         description: Human-readable description of the variable's purpose.
@@ -89,17 +106,20 @@ class SVar(Generic[_T]):
     """
 
     name: str
-    context: Optional[PipelineContext] = None
+    stage: Optional["ETLStage"] = None
     value: Optional[_T] = None
+
+    @property
+    def context(self) -> Optional[PipelineContext]:
+        return self.stage.context if self.stage is not None else None
 
     def __init__(
         self,
         type_: Optional[Type[_T]] = None,
         /,
         *,
-        factory: Optional[Callable[[], _T]] = None,
-        default: Optional[_T] = None,
-        source: Optional[DataSource] = None,
+        value: Optional[SValuable[_T]] = None,
+        source: Optional[SValuable[DataSource]] = None,
         description: Optional[str] = None,
         pre_processing: Optional[Callable[[_T], _T]] = None,
         markers: Optional[List[IOMarker]] = None,
@@ -109,11 +129,8 @@ class SVar(Generic[_T]):
 
         Args:
             type_: The expected type of the variable value.
-            factory: Callable that produces a new instance of the variable value.
-                Cannot be used together with default.
-            default: Static default value for the variable. Cannot be used together
-                with factory.
-            source: Data source for loading/saving the variable value.
+            value: Optional static default value or factory callable.
+            source: Optional static default data source or factory callable for loading/saving the variable value.
             description: Human-readable description of the variable's purpose.
             pre_processing: Optional transformation function applied to values before
                 they are stored in the variable.
@@ -122,15 +139,26 @@ class SVar(Generic[_T]):
         Raises:
             AssertionError: If both factory and default are provided.
         """
-        assert not (factory and default), "Only one of factory or default can be provided"
-        self.factory = factory
-        self.default = default
         self.type = type_
         self.source = source
         self.description = description
-        self.value = self.__create_default_value()
         self.pre_processing = pre_processing
         self.markers = markers or []
+        self.__value__ = value
+
+    def set_stage(self, stage: ETLStage):
+        """
+        Associate this variable with a specific pipeline stage.
+
+        Args:
+            stage: The ETLStage instance that owns this variable.
+
+        Example:
+            >>> var = SVar(pd.DataFrame)
+            >>> stage = MyStage()
+            >>> var.set_stage(stage)
+        """
+        self.stage = stage
 
     def set_markers(self, markers: List[IOMarker]):
         """Set the I/O markers for this variable.
@@ -144,7 +172,7 @@ class SVar(Generic[_T]):
         """
         self.markers = markers
 
-    def __set_name__(self, owner, name):
+    def __set_name__(self, owner, name: str):
         """Descriptor protocol method called when variable is assigned to a class.
 
         This method is automatically called by Python when the variable is
@@ -181,36 +209,6 @@ class SVar(Generic[_T]):
             owner._pending_variables = []  # type: ignore
         owner._pending_variables.append((self, self.markers))  # type: ignore
 
-    def __create_default_value(self) -> Optional[_T]:
-        """
-        Create the initial default value using factory or default.
-
-        Returns:
-            The initial value, or None if neither factory nor default is provided.
-        """
-        if self.factory:
-            value = self.factory()
-            if self.pre_processing:
-                value = self.pre_processing(value)
-            return value
-        elif self.default:
-            value = copy.deepcopy(self.default)
-            if self.pre_processing:
-                value = self.pre_processing(value)
-                return value
-            return value
-        else:
-            return None
-
-    def set_context(self, context: PipelineContext):
-        """
-        Set the pipeline context for this variable.
-
-        Args:
-            context: The pipeline context to use for loading/saving data.
-        """
-        self.context = context
-
     def load(self):
         """
         Load the variable value from its source or context.
@@ -225,12 +223,18 @@ class SVar(Generic[_T]):
             )
 
         try:
-            if hasattr(self, "context") and self.context:
+            # First, try to resolve the default/factory value
+            value = resolve_svaluable(self.__value__, self.stage)
+
+            # Next, try to load from context if value is still None
+            if value is None and self.context is not None:
                 value = self.context.get(self.name, None)
 
+            # Finally, try to load from source if value is still None
             if value is None and self.source and self.source.load_enabled:
                 value = self.source.load()
 
+            # If we have a value, apply preprocessing and store it
             if value is not None:
                 if self.pre_processing:
                     value = self.pre_processing(value)  # type: ignore[arg-type]
@@ -239,7 +243,7 @@ class SVar(Generic[_T]):
             if self.value is None:
                 logger.warning(
                     f"None value for '{self.name}' while loading. "
-                    "No value found in context or source. "
+                    "No value found to load from context or source. "
                     "If intentional, you can ignore this message."
                 )
         except Exception as e:
@@ -265,11 +269,11 @@ class SVar(Generic[_T]):
             if self.value is None:
                 logger.warning(
                     f"None value for '{self.name}' while saving. "
-                    "No value found in context or source. "
+                    "No value found to save after stage execution. "
                     "If intentional, you can ignore this message."
                 )
 
-            if hasattr(self, "context") and self.context:
+            if self.context is not None:
                 self.context.set(self.name, self.value)
             if self.value is not None and self.source is not None and self.source.save_enabled:
                 self.source.save(self.value)
@@ -280,14 +284,14 @@ class SVar(Generic[_T]):
                 f"Original error: {str(e)}"
             ) from e
 
-    def get(self) -> Optional[_T]:
+    def get(self) -> _T:
         """
         Get the current value of the variable.
 
         Returns:
             The current value.
         """
-        return self.value
+        return self.value  # type: ignore[return-value]
 
     def set(self, value: Optional[_T]):
         """
@@ -347,7 +351,7 @@ class SVar(Generic[_T]):
             raise
         return True
 
-    def sconsume(self) -> SVar[_T]:
+    def sconsume(self) -> _T:
         """Mark this variable as an input (consumed) by the stage.
 
         Returns:
@@ -358,9 +362,9 @@ class SVar(Generic[_T]):
             >>> # Equivalent to using sconsume() descriptor function
         """
         self.set_markers([IOMarker.INPUT])
-        return self
+        return self  # type: ignore[return-value]
 
-    def sproduce(self) -> SVar[_T]:
+    def sproduce(self) -> _T:
         """Mark this variable as an output (produced) by the stage.
 
         Returns:
@@ -371,9 +375,9 @@ class SVar(Generic[_T]):
             >>> # Equivalent to using sproduce() descriptor function
         """
         self.set_markers([IOMarker.OUTPUT])
-        return self
+        return self  # type: ignore[return-value]
 
-    def stransform(self) -> SVar[_T]:
+    def stransform(self) -> _T:
         """Mark this variable as both input and output (transformed) by the stage.
 
         Returns:
@@ -384,7 +388,7 @@ class SVar(Generic[_T]):
             >>> # Equivalent to using stransform() descriptor function
         """
         self.set_markers([IOMarker.INPUT, IOMarker.OUTPUT])
-        return self
+        return self  # type: ignore[return-value]
 
     def __get__(self, instance, owner):
         """Descriptor protocol method for attribute access.
@@ -546,7 +550,7 @@ def _diff_schema(schema_model: Type[PaDataFrameModel], df: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
+class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
     """DataFrame variable with DFVarSchema (Pandera) validation and type safety.
 
     DFVar extends SVar to provide specialized handling for pandas DataFrames with
@@ -588,18 +592,17 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
         ...         self.output_data = df  # Validated on save
     """
 
-    schema: Optional[_SCHEMA]
+    schema: Optional[Type[_SCHEMA]]
 
     def __init__(
         self,
-        schema: Optional[_SCHEMA] = None,
+        schema: Optional[Type[_SCHEMA]] = None,
         /,
         *,
-        factory: Optional[Callable[[], DataFrame[_SCHEMA]]] = None,
-        default: Optional[DataFrame[_SCHEMA]] = None,
-        source: Optional[CSVSource] = None,
+        value: Optional[SValuable[PaDataFrame[_SCHEMA]]] = None,
+        source: Optional[SValuable[CSVSource]] = None,
         description: Optional[str] = None,
-        pre_processing: Optional[Callable[[DataFrame[_SCHEMA]], DataFrame[_SCHEMA]]] = None,
+        pre_processing: Optional[Callable[[PaDataFrame[_SCHEMA]], PaDataFrame[_SCHEMA]]] = None,
         markers: Optional[List[IOMarker]] = None,
     ):
         """Initialize a DataFrame variable with optional schema validation.
@@ -608,11 +611,8 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
             schema: Optional DFVarSchema class for runtime validation.
                    If provided, the DataFrame will be validated against this schema
                    whenever validate() is called.
-            factory: Optional callable that produces a new DataFrame instance.
-                    Cannot be used together with default.
-            default: Optional static default DataFrame value.
-                    Cannot be used together with factory.
-            source: Optional CSV source for loading/saving the DataFrame.
+            value: Optional static default DataFrame or factory callable.
+            source: Optional static default CSV source or factory callable for loading/saving the DataFrame.
             description: Optional human-readable description of the DataFrame's purpose.
             pre_processing: Optional transformation function applied to the DataFrame
                           before it is stored in the variable.
@@ -629,7 +629,7 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
             >>> # With factory for empty DataFrame
             >>> var = DFVar(
             ...     MySchema,
-            ...     factory=lambda: pd.DataFrame(columns=['id', 'value'])
+            ...     value=lambda: pd.DataFrame(columns=['id', 'value'])
             ... )
             >>>
             >>> # With preprocessing
@@ -639,67 +639,14 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
             ... )
         """
         super().__init__(
-            DataFrame[_SCHEMA],
-            factory=factory,
-            default=default,
+            PaDataFrame[_SCHEMA],
+            value=value,
             source=source,
             description=description,
             pre_processing=pre_processing,
             markers=markers,
         )
         self.schema = schema
-
-    def _SVar__create_default_value(self) -> Optional[DataFrame[_SCHEMA]]:
-        """Create the initial default value using factory or default.
-
-        Overrides the parent SVar method to use DataFrame.copy() instead of
-        copy.deepcopy() for better performance with large DataFrames. The
-        deepcopy operation can be very slow for DataFrames with many rows.
-
-        Returns:
-            The initial DataFrame value, or None if neither factory nor default
-            is provided.
-
-        Note:
-            This is an internal method that overrides the parent's private method
-            using name mangling. It's called during __init__.
-        """
-
-        if self.factory:
-            value = self.factory()
-            if self.pre_processing:
-                value = self.pre_processing(value)
-            return value
-        elif self.default is not None:
-            if isinstance(self.default, pd.DataFrame):
-                value = self.default.copy()
-            else:
-                value = copy.deepcopy(self.default)
-            if self.pre_processing:
-                value = self.pre_processing(value)
-            return value
-        else:
-            return None
-
-    @property
-    def columns(self) -> Optional[List[str]]:
-        """Get the column names of the DataFrame.
-
-        Returns:
-            List of column names if the DataFrame has a value, None otherwise.
-
-        Example:
-            >>> var = DFVar(MySchema)
-            >>> var.value = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})
-            >>> print(var.columns)
-            ['a', 'b']
-            >>> var.value = None
-            >>> print(var.columns)
-            None
-        """
-        if self.value is None:
-            return None
-        return self.value.columns.tolist()
 
     def validate(self) -> bool:
         """Validate the DataFrame against its schema.
@@ -767,146 +714,6 @@ class DFVar(Generic[_SCHEMA], SVar[DataFrame[_SCHEMA]]):
                 ) from e
         return True
 
-    def iter_chunks(self, chunk_size: int) -> Iterable[DataFrame[_SCHEMA]]:
-        """Iterate over the DataFrame in chunks for memory-efficient processing.
-
-        This generator yields consecutive chunks of the DataFrame, allowing
-        processing of large DataFrames without loading all data into memory
-        at once. Useful for operations that can be applied row-wise or in batches.
-
-        Args:
-            chunk_size: Number of rows per chunk. Must be positive.
-
-        Yields:
-            DataFrame chunks of size chunk_size (last chunk may be smaller).
-
-        Raises:
-            ValueError: If chunk_size is not positive.
-
-        Example:
-            >>> var = DFVar(MySchema)
-            >>> var.value = pd.DataFrame({'id': range(10000), 'value': range(10000)})
-            >>> for chunk in var.iter_chunks(1000):
-            ...     # Process each 1000-row chunk
-            ...     print(f"Processing {len(chunk)} rows")
-            ...     result = expensive_operation(chunk)
-            Processing 1000 rows
-            Processing 1000 rows
-            ...
-            Processing 1000 rows
-
-        Note:
-            If the DataFrame value is None, this method returns immediately
-            without yielding any chunks.
-        """
-        if chunk_size <= 0:
-            raise ValueError(
-                f"chunk_size must be positive, got {chunk_size}. "
-                f"Use a positive integer for the number of rows per chunk."
-            )
-
-        if self.value is None:
-            return
-
-        total_rows = len(self.value)
-        for start_idx in range(0, total_rows, chunk_size):
-            end_idx = min(start_idx + chunk_size, total_rows)
-            # .iloc[] returns type Series[Any] because of an error in pandas stubs
-            yield self.value.iloc[start_idx:end_idx]  # type: ignore
-
-    def process_in_chunks(
-        self,
-        chunk_size: int,
-        process_fn: Callable[[DataFrame[_SCHEMA]], DataFrame[_SCHEMA]],
-    ) -> Optional[DataFrame[_SCHEMA]]:
-        """Process the DataFrame in chunks and concatenate the results.
-
-        This method provides memory-efficient processing of large DataFrames by:
-        1. Splitting the DataFrame into chunks of specified size
-        2. Applying a processing function to each chunk
-        3. Concatenating all processed chunks into a single result DataFrame
-
-        This is particularly useful for operations that would consume too much
-        memory if applied to the entire DataFrame at once, such as:
-        - Complex transformations
-        - Filtering operations
-        - Feature engineering
-        - API calls or database lookups per row
-
-        Args:
-            chunk_size: Number of rows per chunk. Must be positive.
-            process_fn: Function that takes a DataFrame chunk and returns a
-                       processed DataFrame chunk. The function should maintain
-                       the schema type.
-
-        Returns:
-            A new DataFrame containing all processed chunks concatenated together,
-            or None if the current value is None.
-
-        Raises:
-            ValueError: If chunk_size is not positive or process_fn is None.
-            RuntimeError: If processing any chunk fails. The error message includes
-                         the chunk index and row range for debugging.
-
-        Example:
-            >>> var = DFVar(MySchema)
-            >>> var.value = pd.DataFrame({'id': range(10000), 'value': range(10000)})
-            >>>
-            >>> # Filter in chunks
-            >>> result = var.process_in_chunks(
-            ...     chunk_size=1000,
-            ...     process_fn=lambda chunk: chunk[chunk['value'] > 5000]
-            ... )
-            >>> print(len(result))
-            4999
-            >>>
-            >>> # Transform in chunks
-            >>> result = var.process_in_chunks(
-            ...     chunk_size=1000,
-            ...     process_fn=lambda chunk: chunk.assign(
-            ...         value_squared=chunk['value'] ** 2
-            ...     )
-            ... )
-
-        Note:
-            The concatenation uses ignore_index=True, so the resulting DataFrame
-            will have a new sequential index starting from 0.
-        """
-
-        if chunk_size <= 0:
-            raise ValueError(
-                f"chunk_size must be positive, got {chunk_size}. "
-                f"Use a positive integer for the number of rows per chunk."
-            )
-
-        if process_fn is None:
-            raise ValueError("process_fn cannot be None. Provide a function to process each chunk.")
-
-        if self.value is None:
-            return None
-
-        try:
-            processed_chunks = []
-            for i, chunk in enumerate(self.iter_chunks(chunk_size)):
-                try:
-                    processed_chunk = process_fn(chunk)
-                    processed_chunks.append(processed_chunk)
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Error processing chunk {i} (rows {i*chunk_size} to {(i+1)*chunk_size}) "
-                        f"of DataFrame '{self.name}'.\nOriginal error: {str(e)}"
-                    ) from e
-
-            result = pd.concat(processed_chunks, ignore_index=True)
-            return DataFrame[_SCHEMA](result)
-        except Exception as e:
-            if isinstance(e, RuntimeError) and "Error processing chunk" in str(e):
-                raise
-            raise RuntimeError(
-                f"Failed to process DataFrame '{self.name}' in chunks.\n"
-                f"Original error: {str(e)}"
-            ) from e
-
 
 class NDArrayVar(Generic[_T], SVar[np.ndarray]):
     """NumPy array variable with shape validation for numerical data.
@@ -960,9 +767,8 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
     def __init__(
         self,
         *,
-        factory: Optional[Callable[[], np.ndarray]] = None,
-        default: Optional[np.ndarray] = None,
-        source: Optional[ArraySource] = None,
+        value: Optional[SValuable[np.ndarray]] = None,
+        source: Optional[SValuable[ArraySource]] = None,
         description: Optional[str] = None,
         pre_processing: Optional[Callable[[np.ndarray], np.ndarray]] = None,
         shape: Optional[tuple] = None,
@@ -971,11 +777,8 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
         """Initialize a NumPy array variable with optional shape validation.
 
         Args:
-            factory: Optional callable that produces a new array instance.
-                    Cannot be used together with default.
-            default: Optional static default array value.
-                    Cannot be used together with factory.
-            source: Optional ArraySource for loading/saving the array to .npy files.
+            value: Optional static default NumPy array or factory callable.
+            source: Optional static default ArraySource or factory callable for loading/saving the array to .npy files.
             description: Optional human-readable description of the array's purpose.
             pre_processing: Optional transformation function applied to the array
                           before it is stored in the variable.
@@ -988,7 +791,7 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
             >>> # Fixed shape array
             >>> var = NDArrayVar(
             ...     shape=(100, 50),
-            ...     factory=lambda: np.zeros((100, 50)),
+            ...     value=lambda: np.zeros((100, 50)),
             ...     description="Feature matrix"
             ... )
             >>>
@@ -1007,8 +810,7 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
         """
         super().__init__(
             np.ndarray,
-            factory=factory,
-            default=default,
+            value=value,
             source=source,
             description=description,
             pre_processing=pre_processing,

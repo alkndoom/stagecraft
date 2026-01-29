@@ -25,8 +25,8 @@ from pandera.api.pandas.model_config import BaseConfig
 from pandera.typing import Index, Series
 
 from ..core.dataclass import AutoDataClass, autodataclass
-from ..core.pandera import PaConfig, PaDataFrameModel
-from ..core.types import NDArrayGen, PaDataFrame
+from ..core.pandera import PaConfig, PaDataFrame, PaDataFrameModel
+from ..core.types import NDArrayGen
 
 _SCHEMA = TypeVar("_SCHEMA", bound="DFVarSchema")
 

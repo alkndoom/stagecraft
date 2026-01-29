@@ -6,7 +6,7 @@ from .exceptions import AppException, CriticalException
 logger = logging.getLogger(__name__)
 
 
-def handle_exceptions(func):
+def exceptional(func):
     """Decorator to log exceptions and trace function calls with details."""
 
     @functools.wraps(func)

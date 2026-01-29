@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from .data_source import DataSource
 from .pipeline_metadata import PipelineMetadata
 from .stages import ETLStage
 
@@ -202,8 +203,9 @@ class PipelineDefinition:
 
         for stage in self.stages:
             for name in stage._input_keys:
-                var = stage._vars.get(name)
-                has_loadable_source = var.source is not None and var.source.load_enabled  # type: ignore
+                var = stage._dynamic_props.get(name)
+                source: Optional[DataSource] = var["source"]  # type: ignore
+                has_loadable_source = source is not None and source.load_enabled  # type: ignore
                 if name not in available_vars and not has_loadable_source:
                     raise ValueError(
                         f"Stage '{stage.name}' requires input '{name}' "

@@ -1,26 +1,162 @@
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Type, TypeVar, Union
+from __future__ import annotations
+
+from typing import Any, Callable, Dict, Generic, Iterable, List, Optional, Tuple, TypeVar, Union
 
 import pandas as pd
+import pandera
 import pandera.pandas as pa
 
 from .dataclass import AutoDataClass, autodataclass
-from .types import PaDataFrame
 
 ListLikeU = Union[List, pa.typing.Series, pa.typing.Index]
 Hashable = Union[str, int, float, bytes]
-DataFrame = Union[pa.typing.DataFrame, PaDataFrame[Any], pd.DataFrame]
+DataFrame = Union[pa.typing.DataFrame, pandera.typing.DataFrame[Any], pd.DataFrame]
 Axes = Union[ListLikeU, pa.typing.Index, pd.Index]
 
-_T = TypeVar("_T", bound="PaDataFrameModel")
+_T = TypeVar("_T")
 
 pafield = pa.Field
 
 
-class PaDataFrameModel(pa.DataFrameModel):
+class PaDataFrame(Generic[_T], pandera.typing.DataFrame[_T]):
+
+    def iter_chunks(self, chunk_size: int) -> Iterable[PaDataFrame[_T]]:
+        """Iterate over the DataFrame in chunks for memory-efficient processing.
+
+        This generator yields consecutive chunks of the DataFrame, allowing
+        processing of large DataFrames without loading all data into memory
+        at once. Useful for operations that can be applied row-wise or in batches.
+
+        Args:
+            chunk_size: Number of rows per chunk. Must be positive.
+
+        Yields:
+            PaDataFrame chunks of size chunk_size (last chunk may be smaller).
+
+        Raises:
+            ValueError: If chunk_size is not positive.
+
+        Example:
+            >>> var = PaDataFrame[Model]({'id': range(10000), 'value': range(10000)})
+            >>> for chunk in var.iter_chunks(1000):
+            ...     # Process each 1000-row chunk
+            ...     print(f"Processing {len(chunk)} rows")
+            ...     result = expensive_operation(chunk)
+            Processing 1000 rows
+            Processing 1000 rows
+            ...
+            Processing 1000 rows
+
+        Note:
+            If the DataFrame value is None, this method returns immediately
+            without yielding any chunks.
+        """
+        if chunk_size <= 0:
+            raise ValueError(
+                f"chunk_size must be positive, got {chunk_size}. "
+                f"Use a positive integer for the number of rows per chunk."
+            )
+
+        total_rows = len(self)
+        for start_idx in range(0, total_rows, chunk_size):
+            end_idx = min(start_idx + chunk_size, total_rows)
+            # .iloc[] returns type Series[Any] because of an error in pandas stubs
+            yield self.iloc[start_idx:end_idx]  # type: ignore
+
+    def process_in_chunks(
+        self,
+        chunk_size: int,
+        process_fn: Callable[[PaDataFrame[_T]], PaDataFrame[_T]],
+    ) -> PaDataFrame[_T]:
+        """Process the DataFrame in chunks and concatenate the results.
+
+        This method provides memory-efficient processing of large DataFrames by:
+        1. Splitting the DataFrame into chunks of specified size
+        2. Applying a processing function to each chunk
+        3. Concatenating all processed chunks into a single result DataFrame
+
+        This is particularly useful for operations that would consume too much
+        memory if applied to the entire DataFrame at once, such as:
+        - Complex transformations
+        - Filtering operations
+        - Feature engineering
+        - API calls or database lookups per row
+
+        Args:
+            chunk_size: Number of rows per chunk. Must be positive.
+            process_fn: Function that takes a PaDataFrame chunk and returns a
+                       processed PaDataFrame chunk. The function should maintain
+                       the schema type.
+
+        Returns:
+            A new PaDataFrame containing all processed chunks concatenated together.
+
+        Raises:
+            ValueError: If chunk_size is not positive or process_fn is None.
+            RuntimeError: If processing any chunk fails. The error message includes
+                         the chunk index and row range for debugging.
+
+        Example:
+            >>> var = PaDataFrame[Model]({'id': range(10000), 'value': range(10000)})
+            >>>
+            >>> # Filter in chunks
+            >>> result = var.process_in_chunks(
+            ...     chunk_size=1000,
+            ...     process_fn=lambda chunk: chunk[chunk['value'] > 5000]
+            ... )
+            >>> print(len(result))
+            4999
+            >>>
+            >>> # Transform in chunks
+            >>> result = var.process_in_chunks(
+            ...     chunk_size=1000,
+            ...     process_fn=lambda chunk: chunk.assign(
+            ...         value_squared=chunk['value'] ** 2
+            ...     )
+            ... )
+
+        Note:
+            The concatenation uses ignore_index=True, so the resulting DataFrame
+            will have a new sequential index starting from 0.
+        """
+
+        if chunk_size <= 0:
+            raise ValueError(
+                f"chunk_size must be positive, got {chunk_size}. "
+                f"Use a positive integer for the number of rows per chunk."
+            )
+
+        if process_fn is None:
+            raise ValueError("process_fn cannot be None. Provide a function to process each chunk.")
+
+        try:
+            processed_chunks = []
+            for i, chunk in enumerate(self.iter_chunks(chunk_size)):
+                try:
+                    processed_chunk = process_fn(chunk)
+                    processed_chunks.append(processed_chunk)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Error processing chunk {i} (rows {i*chunk_size} to {(i+1)*chunk_size}) "
+                        f"of PaDataFrame '{self.__class__.__name__}'.\nOriginal error: {str(e)}"
+                    ) from e
+
+            result = pd.concat(processed_chunks, ignore_index=True)
+            return PaDataFrame[_T](result)
+        except Exception as e:
+            if isinstance(e, RuntimeError) and "Error processing chunk" in str(e):
+                raise
+            raise RuntimeError(
+                f"Failed to process PaDataFrame '{self.__class__.__name__}' in chunks.\n"
+                f"Original error: {str(e)}"
+            ) from e
+
+
+class PaDataFrameModel(pa.DataFrameModel, Generic[_T]):
 
     @classmethod
     def DF(
-        cls: Type[_T],
+        cls,
         data: Optional[
             Union[
                 ListLikeU,
@@ -163,6 +299,7 @@ class PaConfig(AutoDataClass):
 
 __all__ = [
     "pafield",
+    "PaDataFrame",
     "PaDataFrameModel",
     "PaConfig",
 ]

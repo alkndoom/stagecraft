@@ -32,7 +32,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-from ..core.wrappers import handle_exceptions
+from ..core.wrappers import exceptional
 from .conditions import AlwaysExecute, StageCondition
 from .context import PipelineContext
 from .markers import IOMarker
@@ -66,7 +66,6 @@ class ETLStage(ABC):
         context: The pipeline context for variable storage and retrieval.
         parameters: List of configurable parameters for the stage.
         condition: Condition determining whether the stage should execute.
-        _vars: Internal mapping of variable names to SVar instances.
         _input_keys: List of variable names marked as inputs.
         _output_keys: List of variable names marked as outputs.
         _dynamic_props: Internal mapping for dynamic property access.
@@ -116,7 +115,6 @@ class ETLStage(ABC):
         self.condition: StageCondition = condition or getattr(
             self.__class__, "condition", AlwaysExecute()
         )
-        self._vars: Dict[str, SVar] = {}
         self._input_keys: List[str] = []
         self._output_keys: List[str] = []
         self._dynamic_props: Dict[str, Dict[str, Any]] = {}
@@ -142,9 +140,8 @@ class ETLStage(ABC):
     def set_context(self, context: PipelineContext):
         """Inject or replace the pipeline context for this stage.
 
-        This method sets the pipeline context for the stage and propagates it
-        to all registered variables. The context is used for storing and
-        retrieving variable values during pipeline execution.
+        This method sets the pipeline context for the stage. The context
+        is used for storing and retrieving variable values during pipeline execution.
 
         Args:
             context: The pipeline context to inject. Cannot be None.
@@ -162,8 +159,6 @@ class ETLStage(ABC):
             raise ValueError(f"Cannot set None as context for stage '{self.name}'")
 
         self.context = context
-        for var in self._vars.values():
-            var.set_context(context)
 
     def add_consumed(self, *var: SVar):
         """Add one or more variables as inputs (consumed) to this stage.
@@ -248,14 +243,14 @@ class ETLStage(ABC):
                 "Variable name is not set. Ensure the variable is properly initialized in a class."
             )
 
-        def deleter(name: str):
-            del self._vars[name]
-
-        self._vars[name] = var
+        var.set_stage(self)
         self._dynamic_props[name] = {
-            "getter": self._vars[name].get,
-            "setter": self._vars[name].set,
-            "deleter": lambda: deleter(name),
+            "getter": var.get,
+            "setter": var.set,
+            "deleter": var.delete,
+            "loader": var.load,
+            "saver": var.save,
+            "source": var.source,
         }
 
     def load_inputs(self):
@@ -281,7 +276,7 @@ class ETLStage(ABC):
         """
         try:
             for name in self._input_keys:
-                self._vars[name].load()
+                self._dynamic_props[name]["loader"]()
         except Exception as e:
             raise ValueError(
                 f"Failed to load input '{name}' for stage '{self.name}'. "
@@ -313,7 +308,7 @@ class ETLStage(ABC):
         """
         try:
             for name in self._output_keys:
-                self._vars[name].save()
+                self._dynamic_props[name]["saver"]()
         except Exception as e:
             raise ValueError(
                 f"Failed to save output '{name}' for stage '{self.name}'. "
@@ -331,8 +326,6 @@ class ETLStage(ABC):
         Note:
             This is an internal method and should not be called directly.
         """
-        while self._vars:
-            del self._vars[next(iter(self._vars))]
         self._input_keys.clear()
         self._output_keys.clear()
         self._dynamic_props.clear()
@@ -457,7 +450,7 @@ class ETLStage(ABC):
         """
         pass
 
-    @handle_exceptions
+    @exceptional
     def __safe_recipe(self, **kwargs):
         """Execute the recipe in a controlled environment.
 

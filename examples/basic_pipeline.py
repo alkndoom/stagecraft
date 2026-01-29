@@ -17,7 +17,7 @@ from typing import Annotated
 import pandas as pd
 import pandera.pandas as pa
 
-from stagecraft import LoggingManagerConfig, setup_logger
+from stagecraft import setup_logger
 from stagecraft.core.dataclass import autodataclass
 from stagecraft.pipeline.data_source import CSVSource
 from stagecraft.pipeline.definition import PipelineDefinition
@@ -26,11 +26,7 @@ from stagecraft.pipeline.schemas import DFVarSchema
 from stagecraft.pipeline.stages import ETLStage
 from stagecraft.pipeline.variables import DFVar
 
-setup_logger(
-    LoggingManagerConfig(
-        level=logging.DEBUG,
-    )
-)
+setup_logger()
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +68,8 @@ class TransformDataStage(ETLStage):
         df["total"] = df["quantity"] * df["price"]
         df = df[df["total"] > 0]
         df["date"] = pd.to_datetime(df["date"])
+        logger.debug("Transformed data:")
+        logger.debug(f"\n{df}")
         logger.debug(f"Processed {len(df)} rows")
         logger.debug(f"Total revenue: ${df['total'].sum():.2f}")
         self.processed_data = df
@@ -97,4 +95,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    pass

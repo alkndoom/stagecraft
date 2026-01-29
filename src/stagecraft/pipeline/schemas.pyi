@@ -4,8 +4,8 @@ from typing import Any, ClassVar, Dict, List, Optional, Type, TypeVar
 import pyarrow as pa_arrow
 
 from ..core.dataclass import AutoDataClass, autodataclass
-from ..core.pandera import PaConfig, PaDataFrameModel
-from ..core.types import NDArrayGen, PaDataFrame
+from ..core.pandera import PaConfig, PaDataFrame, PaDataFrameModel
+from ..core.types import NDArrayGen
 
 _SCHEMA = TypeVar("_SCHEMA", bound="DFVarSchema")
 
