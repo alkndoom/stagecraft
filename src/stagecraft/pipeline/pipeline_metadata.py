@@ -1,11 +1,12 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
 from ..core.exceptions import AppException
 from ..core.serializable import Serializable
+from .conditions import StageCondition
 
 
 class ExecutionStatus(Enum):
@@ -21,6 +22,8 @@ class StageExecutionMetadata(Serializable):
     duration: Optional[float] = None
     status: ExecutionStatus = ExecutionStatus.PENDING
     error: Optional[Exception] = None
+    sub_stages: List["StageExecutionMetadata"] = Field(default_factory=list)
+    additional_info: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if not isinstance(self.error, AppException):
@@ -49,7 +52,9 @@ class StageParameter(Serializable):
 
 class StageMetadata(Serializable):
     name: str
+    condition: Optional[StageCondition] = None
     parameters: List[StageParameter] = Field(default_factory=list)
+    sub_stages: List["StageMetadata"] = Field(default_factory=list)
 
 
 class PipelineMetadata(Serializable):

@@ -24,11 +24,18 @@ Example:
 
 from typing import Optional, Type, Union
 
+from .helpers import SValuable
 from .markers import IOMarker
 from .variables import _T, SVar
 
 
-def sconsume(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
+def sconsume(
+    var: Optional[Union[SVar[_T], Type[_T]]] = None,
+    /,
+    *,
+    value: Optional[SValuable[_T]] = None,
+    force_overwrite: bool = False,
+) -> SVar:
     """Declare a stage variable as an input (consumed).
 
     This descriptor marks a variable as an input to the stage, meaning the stage
@@ -43,6 +50,8 @@ def sconsume(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
             - None: Type will be inferred from the class attribute annotation
             - Type[_T]: A type hint (e.g., pd.DataFrame, dict, str)
             - SVar[_T]: An existing SVar instance to be marked as input
+        value: Optional static default value or factory callable.
+        force_overwrite: If True, forces reloading the variable even if already loaded.
 
     Returns:
         An SVar instance marked with IOMarker.INPUT, indicating this variable
@@ -69,12 +78,21 @@ def sconsume(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
         To modify a variable, use stransform() instead.
     """
     if var is None:
-        variable = SVar(markers=[IOMarker.INPUT])
+        variable = SVar(
+            markers=[IOMarker.INPUT],
+            value=value,
+            force_overwrite=force_overwrite,
+        )
     elif isinstance(var, SVar):
         variable = var
         variable.set_markers([IOMarker.INPUT])
     else:
-        variable = SVar(var, markers=[IOMarker.INPUT])
+        variable = SVar(
+            var,
+            markers=[IOMarker.INPUT],
+            value=value,
+            force_overwrite=force_overwrite,
+        )
     return variable
 
 
@@ -130,7 +148,13 @@ def sproduce(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
     return variable
 
 
-def stransform(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
+def stransform(
+    var: Optional[Union[SVar[_T], Type[_T]]] = None,
+    /,
+    *,
+    value: Optional[SValuable[_T]] = None,
+    force_overwrite: bool = False,
+) -> SVar:
     """Declare a stage variable as both input and output (transformed).
 
     This descriptor marks a variable as both an input and output of the stage,
@@ -147,6 +171,8 @@ def stransform(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
             - None: Type will be inferred from the class attribute annotation
             - Type[_T]: A type hint (e.g., pd.DataFrame, dict, str)
             - SVar[_T]: An existing SVar instance to be marked as input/output
+        value: Optional static default value or factory callable.
+        force_overwrite: If True, forces reloading the variable even if already loaded.
 
     Returns:
         An SVar instance marked with both IOMarker.INPUT and IOMarker.OUTPUT,
@@ -179,10 +205,19 @@ def stransform(var: Optional[Union[SVar[_T], Type[_T]]] = None, /) -> SVar:
         stages transform the same variable concurrently.
     """
     if var is None:
-        variable = SVar(markers=[IOMarker.INPUT, IOMarker.OUTPUT])
+        variable = SVar(
+            markers=[IOMarker.INPUT, IOMarker.OUTPUT],
+            value=value,
+            force_overwrite=force_overwrite,
+        )
     elif isinstance(var, SVar):
         variable = var
         variable.set_markers([IOMarker.INPUT, IOMarker.OUTPUT])
     else:
-        variable = SVar(var, markers=[IOMarker.INPUT, IOMarker.OUTPUT])
+        variable = SVar(
+            var,
+            markers=[IOMarker.INPUT, IOMarker.OUTPUT],
+            value=value,
+            force_overwrite=force_overwrite,
+        )
     return variable

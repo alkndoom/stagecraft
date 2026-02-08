@@ -1,9 +1,9 @@
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, Union
 
 from .context import PipelineContext
-from .definition import PipelineDefinition
+from .definition import PipelineDefinition, invert_dependency_map
 from .memory import MemoryConfig
 from .pipeline_metadata import (
     ExecutionStatus,
@@ -32,7 +32,7 @@ class PipelineRunner:
         )
 
         logger.info(f"Starting pipeline execution: {pipeline.name}")
-        logger.info(f"Pipeline metadata: {pipeline.get_metadata()}")
+        # logger.info(f"Pipeline metadata: {pipeline.get_metadata()}")
 
     def __finalize_execution(self, success: bool, error: Exception = None) -> None:  # type: ignore
         """Finalize pipeline execution."""
@@ -54,7 +54,11 @@ class PipelineRunner:
                     f"Pipeline failed after {self.execution_metadata.duration:.2f} seconds"
                 )
 
-    def run(self, pipeline: PipelineDefinition, initial_context: Dict[str, Any] = None) -> PipelineResult:  # type: ignore
+    def run(
+        self,
+        pipeline: PipelineDefinition,
+        context: Optional[Union[Dict[str, Any], PipelineContext]] = None,
+    ) -> PipelineResult:
         """
         Execute a complete ETL pipeline.
 
@@ -65,11 +69,15 @@ class PipelineRunner:
             Dictionary containing execution results and metadata
         """
         try:
-            pipeline.validate(initial_context)
-            self.__initialize_execution(pipeline)
+            if isinstance(context, dict):
+                context = PipelineContext(context, memory_config=self.memory_config)
+            elif context is None:
+                context = PipelineContext(memory_config=self.memory_config)
+            else:
+                self.memory_config = context.memory_manager.config
 
-            # Create pipeline context with memory management
-            context = PipelineContext(initial_context, memory_config=self.memory_config)
+            pipeline.validate(context.variables)
+            self.__initialize_execution(pipeline)
 
             # Inject context into all stages
             for stage in pipeline.stages:
@@ -89,125 +97,105 @@ class PipelineRunner:
             result = PipelineResult(success=False, metadata=self.execution_metadata, error=e)
             return result
 
-    def __build_variable_dependency_map(self, pipeline: PipelineDefinition) -> Dict[str, Set[str]]:
-        """
-        Build a map of which variables are required by which stages.
-
-        Args:
-            pipeline: Pipeline definition
-
-        Returns:
-            Dictionary mapping variable names to sets of stage names that require them
-        """
-        var_required_by: Dict[str, Set[str]] = {}
-
-        for stage in pipeline.stages:
-            for name in stage._input_keys:
-                if name not in var_required_by:
-                    var_required_by[name] = set()
-                var_required_by[name].add(stage.name)
-
-        return var_required_by
-
-    def __log_stage_start(self, stage_index: int, total_stages: int, stage_name: str) -> None:
-        """Log the start of stage execution."""
-        logger.info(f"Executing stage {stage_index + 1}/{total_stages}: {stage_name}")
-
     def __record_stage_metadata(self, metadata: StageExecutionMetadata) -> None:
         """Record stage execution metadata to pipeline execution metadata."""
         if self.execution_metadata:
             self.execution_metadata.stages_executed.append(metadata)
 
-    def __create_stage_metadata(
-        self, stage_name: str, start_time: datetime, status: ExecutionStatus, error: Exception = None  # type: ignore
+    def __create_stage_execution_metadata(
+        self,
+        stage: ETLStage,
+        status: ExecutionStatus,
+        error: Optional[Exception] = None,
     ) -> StageExecutionMetadata:
         """Create stage execution metadata with calculated duration."""
+        try:
+            duration = (stage.end_time - stage.start_time).total_seconds()  # type: ignore
+        except Exception:
+            duration = 0.0
         return StageExecutionMetadata(
-            name=stage_name,
-            duration=(datetime.now() - start_time).total_seconds(),
+            name=stage.name,
+            duration=duration,
             status=status,
             error=error,
+            sub_stages=[
+                self.__create_stage_execution_metadata(s, status) for s in stage.sub_stages
+            ],
+            additional_info=stage.execution_metadata,
         )
 
-    def __handle_skipped_stage(
-        self, stage: ETLStage, start_time: datetime, completed_stages: Set[str]
-    ) -> None:
-        """Handle a stage that was skipped due to its execution condition."""
+    def __handle_skipped_stage(self, stage: ETLStage, completed_stages: Set[str]) -> None:
+        """Handle a stage that was skipped due to its execution condition.
+
+        When a stage is skipped, all its sub-stages are also marked as completed
+        for memory management purposes, since they won't be executed either.
+        """
         skip_reason = stage.get_skip_reason()
+        metadata = self.__create_stage_execution_metadata(stage, ExecutionStatus.SKIPPED)
+        self.__record_stage_metadata(metadata)
         logger.info(f"Skipping stage '{stage.name}': {skip_reason}")
+        for s in stage.all_stages:
+            completed_stages.add(s.name)
 
-        metadata = self.__create_stage_metadata(stage.name, start_time, ExecutionStatus.SKIPPED)
-        self.__record_stage_metadata(metadata)
-        completed_stages.add(stage.name)
-
-    def __handle_successful_stage(
-        self, stage_name: str, start_time: datetime, completed_stages: Set[str]
-    ) -> None:
+    def __handle_successful_stage(self, stage: ETLStage, completed_stages: Set[str]) -> None:
         """Handle a stage that executed successfully."""
-        metadata = self.__create_stage_metadata(stage_name, start_time, ExecutionStatus.COMPLETED)
+        metadata = self.__create_stage_execution_metadata(stage, ExecutionStatus.COMPLETED)
         self.__record_stage_metadata(metadata)
-        logger.info(f"Stage completed in {metadata.duration:.2f} seconds")
-        completed_stages.add(stage_name)
+        logger.info(f"Stage {stage.name} completed in {metadata.duration:.2f} seconds")
+        for s in stage.all_stages:
+            completed_stages.add(s.name)
 
-    def __handle_failed_stage(
-        self, stage_name: str, start_time: datetime, error: Exception
-    ) -> None:
+    def __handle_failed_stage(self, stage: ETLStage, error: Exception) -> None:
         """Handle a stage that failed during execution."""
-        metadata = self.__create_stage_metadata(
-            stage_name, start_time, ExecutionStatus.FAILED, error
-        )
+        metadata = self.__create_stage_execution_metadata(stage, ExecutionStatus.FAILED, error)
         self.__record_stage_metadata(metadata)
+        logger.error(f"Stage '{stage.name}' failed: {error}")
 
     def __auto_clear_memory_if_enabled(
         self,
         context: PipelineContext,
-        var_required_by: Dict[str, Set[str]],
+        inverted_dependency_map: Dict[str, Set[str]],
         completed_stages: Set[str],
     ) -> None:
         """Auto-clear unused variables from memory if memory management is enabled."""
-        if self.memory_config.enabled and self.memory_config.auto_clear_enabled and context:
-            cleared = context.auto_clear_unused_variables(var_required_by, completed_stages)
-            if cleared > 0:
-                logger.info(f"Auto-cleared {cleared} unused variable(s) from memory")
+        cleared = context.auto_clear_unused_variables(inverted_dependency_map, completed_stages)
+        if len(cleared) > 0:
+            logger.info(f"Auto-cleared {len(cleared)} unused variable(s) from memory: {cleared}")
 
     def __execute_single_stage(
         self,
         stage: ETLStage,
-        stage_index: int,
-        total_stages: int,
         context: PipelineContext,
-        var_required_by: Dict[str, Set[str]],
+        inverted_dependency_map: Dict[str, Set[str]],
         completed_stages: Set[str],
     ) -> None:
-        """Execute a single pipeline stage with error handling and metadata tracking."""
-        self.__log_stage_start(stage_index, total_stages, stage.name)
-        stage_start = datetime.now()
+        """Execute a single pipeline stage with error handling and metadata tracking.
 
+        When a stage executes successfully, this method marks both the stage and all
+        its sub-stages as completed. This ensures that memory management can properly
+        clear variables that are only consumed by sub-stages.
+        """
         try:
-            if not stage.should_execute():
-                self.__handle_skipped_stage(stage, stage_start, completed_stages)
+            stage_result = stage.execute()
+            if not stage_result:
+                self.__handle_skipped_stage(stage, completed_stages)
                 return
 
-            stage.execute()
-            self.__handle_successful_stage(stage.name, stage_start, completed_stages)
-            self.__auto_clear_memory_if_enabled(context, var_required_by, completed_stages)
-
+            self.__handle_successful_stage(stage, completed_stages)
+            self.__auto_clear_memory_if_enabled(context, inverted_dependency_map, completed_stages)
         except Exception as e:
-            self.__handle_failed_stage(stage.name, stage_start, e)
+            self.__handle_failed_stage(stage, e)
             raise
 
     def __execute_pipeline_stages(self, pipeline: PipelineDefinition, context: PipelineContext):
         """Execute pipeline stages sequentially."""
         completed_stages: Set[str] = set()
-        var_required_by = self.__build_variable_dependency_map(pipeline)
 
-        for i, stage in enumerate(pipeline.stages):
+        for stage in pipeline.stages:
             self.__execute_single_stage(
                 stage,
-                i,
-                len(pipeline.stages),
                 context,
-                var_required_by,
+                invert_dependency_map(pipeline.dependency_map),
                 completed_stages,
             )
 

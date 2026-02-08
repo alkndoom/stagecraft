@@ -76,7 +76,7 @@ class MemoryConfig(AutoDataClass):
     warning_threshold_mb: float = 1000.0
     auto_clear_enabled: bool = True
     track_per_variable: bool = True
-    log_memory_usage: bool = True
+    log_memory_usage: bool = False
 
 
 @autodataclass

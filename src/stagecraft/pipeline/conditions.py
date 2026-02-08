@@ -56,6 +56,9 @@ class StageCondition(ABC):
         """
         pass
 
+    def __repr__(self):
+        return self.__str__()
+
 
 class AlwaysExecute(StageCondition):
     """Condition that always executes (default behavior)."""
@@ -65,6 +68,65 @@ class AlwaysExecute(StageCondition):
 
     def get_skip_reason(self) -> str:
         return ""
+
+    def __str__(self):
+        return "AlwaysExecute()"
+
+
+class NeverExecute(StageCondition):
+    """Condition that never executes."""
+
+    def should_execute(self, context: PipelineContext, stage_name: str) -> bool:
+        return False
+
+    def get_skip_reason(self) -> str:
+        return "NeverExecute condition always skips execution"
+
+    def __str__(self):
+        return "NeverExecute()"
+
+
+class VariableCondition(StageCondition):
+    """
+    Execute stage based on the truthiness of a variable in context.
+
+    Example:
+        ```python
+        class ConditionalStage(ETLStage):
+            name = "conditional_stage"
+            condition = VariableCondition("should_run")
+
+            def recipe(self):
+                # Only runs if context variable 'should_run' is truthy
+                pass
+        ```
+    """
+
+    def __init__(self, variable_name: str, truthiness: bool = True):
+        self.variable_name = variable_name
+        self.truthiness = truthiness
+        self._skip_reason = ""
+
+    def should_execute(self, context: PipelineContext, stage_name: str) -> bool:
+        if not context.has(self.variable_name):
+            self._skip_reason = f"Variable '{self.variable_name}' not found in context"
+            return False
+
+        value = context.get(self.variable_name)
+
+        if bool(value) != self.truthiness:
+            self._skip_reason = (
+                f"Variable '{self.variable_name}' is not {'truthy' if self.truthiness else 'falsy'}"
+            )
+            return False
+
+        return True
+
+    def get_skip_reason(self) -> str:
+        return self._skip_reason
+
+    def __str__(self):
+        return f"VariableCondition(variable_name={self.variable_name})"
 
 
 class InputNotEmptyCondition(StageCondition):
@@ -116,6 +178,9 @@ class InputNotEmptyCondition(StageCondition):
     def get_skip_reason(self) -> str:
         return self._skip_reason
 
+    def __str__(self):
+        return f"InputNotEmptyCondition(variable_name={self.variable_name})"
+
 
 class ConfigFlagCondition(StageCondition):
     """
@@ -142,6 +207,9 @@ class ConfigFlagCondition(StageCondition):
 
     def get_skip_reason(self) -> str:
         return f"Configuration flag '{self.config_key}' is not enabled"
+
+    def __str__(self):
+        return f"ConfigFlagCondition(config_key={self.config_key})"
 
 
 class VariableExistsCondition(StageCondition):
@@ -171,6 +239,9 @@ class VariableExistsCondition(StageCondition):
 
     def get_skip_reason(self) -> str:
         return f"Variable '{self.variable_name}' does not exist in context"
+
+    def __str__(self):
+        return f"VariableExistsCondition(variable_name={self.variable_name})"
 
 
 class CustomCondition(StageCondition):
@@ -214,6 +285,9 @@ class CustomCondition(StageCondition):
     def get_skip_reason(self) -> str:
         return self.skip_reason
 
+    def __str__(self):
+        return f"CustomCondition(condition_fn={self.condition_fn})"
+
 
 class AndCondition(StageCondition):
     """
@@ -250,6 +324,9 @@ class AndCondition(StageCondition):
             return self._failed_condition.get_skip_reason()
         return "One or more conditions not met"
 
+    def __str__(self):
+        return f"AndCondition(conditions={self.conditions})"
+
 
 class OrCondition(StageCondition):
     """
@@ -278,3 +355,6 @@ class OrCondition(StageCondition):
 
     def get_skip_reason(self) -> str:
         return "None of the conditions were met"
+
+    def __str__(self):
+        return f"OrCondition(conditions={self.conditions})"

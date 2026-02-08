@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import atexit
 import logging
+import re
 import sys
 import threading
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import Any, Optional, TextIO
 
 from .dataclass import AutoDataClass, autodataclass
 
 
-class _ANSIColors(Enum):
+class ANSIColors(Enum):
     BLACK = "\033[30m"
     RED = "\033[31m"
     GREEN = "\033[32m"
@@ -70,6 +71,10 @@ class _ANSIColors(Enum):
     END = "\033[0m"
 
 
+def color_fmt(msg: Any, color: ANSIColors) -> str:
+    return f"{color.value}{str(msg)}{ANSIColors.END.value}"
+
+
 @autodataclass
 class LoggingManagerConfig(AutoDataClass):
     app_name: str = "app"
@@ -92,13 +97,16 @@ class LoggingManagerConfig(AutoDataClass):
     also_capture_stdout_stderr: bool = False
 
 
+_std_fmt = "%(asctime)s.%(msecs)03d    [ %(levelname)s ] %(message)s"
+
+
 class _ColoredConsoleFormatter(logging.Formatter):
     COLORS = {
-        logging.DEBUG: _ANSIColors.BLUE,
-        logging.INFO: _ANSIColors.GREEN,
-        logging.WARNING: _ANSIColors.YELLOW,
-        logging.ERROR: _ANSIColors.RED,
-        logging.CRITICAL: _ANSIColors.RED_BRIGHT,
+        logging.DEBUG: ANSIColors.BLUE,
+        logging.INFO: ANSIColors.GREEN,
+        logging.WARNING: ANSIColors.YELLOW,
+        logging.ERROR: ANSIColors.RED,
+        logging.CRITICAL: ANSIColors.RED_BRIGHT,
     }
 
     def __init__(
@@ -108,7 +116,7 @@ class _ColoredConsoleFormatter(logging.Formatter):
         datefmt: Optional[str] = None,
         utc: bool = False,
     ) -> None:
-        fmt = fmt or "%(asctime)s.%(msecs)03d [ %(levelname)s ] %(message)s [ %(name)s ]"
+        fmt = fmt or _std_fmt
         datefmt = datefmt or "%Y-%m-%d %H:%M:%S"
         super().__init__(fmt=fmt, datefmt=datefmt)
 
@@ -116,17 +124,29 @@ class _ColoredConsoleFormatter(logging.Formatter):
             self.converter = lambda *args: datetime.now(timezone.utc).timetuple()
 
     def format(self, record: logging.LogRecord) -> str:
-        log_color = self.COLORS.get(record.levelno, _ANSIColors.DEFAULT)
+        log_color = self.COLORS.get(record.levelno, ANSIColors.DEFAULT)
         formatted = super().format(record)
 
-        if " [ " in formatted and formatted.endswith(" ]"):
-            # Find the last occurrence of " [ "
-            last_bracket_idx = formatted.rfind(" [ ")
-            colored_part = formatted[:last_bracket_idx]
-            name_part = formatted[last_bracket_idx:]
+        pattern_number = r"( \d+\.?\d* )"
+        pattern = r"color_fmt\(([^,]+),\s*(?:<)?ANSIColors\.(\w+)(?::[^>]+>)?\)"
 
-            return f"{log_color.value}{colored_part}{_ANSIColors.END.value}{name_part}"
-        return f"{log_color.value}{formatted}{_ANSIColors.END.value}"
+        def replace_number(match):
+            number = match.group(1)
+            return f"{ANSIColors.DEFAULT.value}{number}{log_color.value}"
+
+        def replace_color_fmt(match):
+            text = match.group(1)
+            color_name = match.group(2)
+            try:
+                color = ANSIColors[color_name]
+                return f"{color.value}{text}{log_color.value}"
+            except KeyError:
+                return match.group(0)  # Return original if color not found
+
+        formatted = re.sub(pattern_number, replace_number, formatted)
+        formatted = re.sub(pattern, replace_color_fmt, formatted)
+
+        return f"{log_color.value}{formatted}{ANSIColors.END.value}"
 
 
 class _SimpleConsoleFormatter(logging.Formatter):
@@ -137,7 +157,7 @@ class _SimpleConsoleFormatter(logging.Formatter):
         datefmt: Optional[str] = None,
         utc: bool = False,
     ) -> None:
-        fmt = fmt or "%(asctime)s.%(msecs)03d [ %(levelname)s ] %(message)s [ %(name)s ]"
+        fmt = fmt or _std_fmt
         datefmt = datefmt or "%Y-%m-%d %H:%M:%S"
         super().__init__(fmt=fmt, datefmt=datefmt)
 

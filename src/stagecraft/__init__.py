@@ -1,14 +1,14 @@
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 from .core.csv import append_csv, read_csv, write_csv
 from .core.dataclass import AutoDataClass, autodataclass
 from .core.exceptions import AppException, CriticalException
 from .core.file import append_file, read_file, write_file
 from .core.json import append_json, read_json, write_json
-from .core.logging import LoggingManager, LoggingManagerConfig, setup_logger
+from .core.logging import ANSIColors, LoggingManager, LoggingManagerConfig, color_fmt, setup_logger
 from .core.os import get_dated_filename, get_files, get_folders, get_unique_filename
 from .core.pandera import PaConfig, PaDataFrame, PaDataFrameModel, pafield
-from .core.serializable import Serializable
+from .core.serializable import FrozenSerializable, Serializable
 from .core.str import (
     anti_capitalize,
     camel_to_snake_case,
@@ -41,14 +41,18 @@ from .pipeline.conditions import (
     ConfigFlagCondition,
     CustomCondition,
     InputNotEmptyCondition,
+    NeverExecute,
     OrCondition,
     StageCondition,
+    VariableCondition,
     VariableExistsCondition,
 )
 from .pipeline.context import PipelineContext
 from .pipeline.data_source import CSVSource, DataSource, FileSource, JSONSource
-from .pipeline.definition import PipelineDefinition
+from .pipeline.definition import PipelineDefinition, invert_dependency_map
 from .pipeline.descriptors import sconsume, sproduce, stransform
+from .pipeline.helpers import SValuable
+from .pipeline.loops import StageLoop
 from .pipeline.markers import IOMarker
 from .pipeline.memory import MemoryConfig, MemoryManager, MemoryTracker, VariableMemoryInfo
 from .pipeline.pipeline_metadata import (
@@ -80,8 +84,10 @@ __all__ = [
     "append_json",
     "read_json",
     "write_json",
+    "ANSIColors",
     "LoggingManager",
     "LoggingManagerConfig",
+    "color_fmt",
     "setup_logger",
     "get_dated_filename",
     "get_files",
@@ -91,6 +97,7 @@ __all__ = [
     "PaDataFrame",
     "PaDataFrameModel",
     "pafield",
+    "FrozenSerializable",
     "Serializable",
     "anti_capitalize",
     "camel_to_snake_case",
@@ -122,6 +129,7 @@ __all__ = [
     "JSONSource",
     "PipelineContext",
     "PipelineDefinition",
+    "invert_dependency_map",
     "PipelineMetadata",
     "PipelineRunner",
     "DFVarSchema",
@@ -132,6 +140,8 @@ __all__ = [
     "sconsume",
     "sproduce",
     "stransform",
+    "SValuable",
+    "StageLoop",
     "IOMarker",
     "MemoryConfig",
     "MemoryManager",
@@ -146,6 +156,8 @@ __all__ = [
     "StageCondition",
     "AlwaysExecute",
     "InputNotEmptyCondition",
+    "NeverExecute",
+    "VariableCondition",
     "ConfigFlagCondition",
     "VariableExistsCondition",
     "CustomCondition",

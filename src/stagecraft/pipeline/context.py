@@ -6,7 +6,7 @@ It includes memory tracking capabilities and automatic cleanup of unused variabl
 to optimize memory usage during pipeline execution.
 """
 
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from .memory import MemoryConfig, MemoryManager
 
@@ -169,34 +169,39 @@ class PipelineContext:
         return cleared_count
 
     def auto_clear_unused_variables(
-        self, required_by_map: Dict[str, Set[str]], completed_stages: Set[str]
-    ) -> int:
+        self,
+        inverted_dependency_map: Dict[str, Set[str]],
+        completed_stages: Set[str],
+    ) -> List[str]:
         """
         Automatically clear variables that are no longer needed.
 
         Args:
-            required_by_map: Map of variable name to set of stage names that require it
+            dependency_map: Map of variable name to set of stage names that require it
             completed_stages: Set of stage names that have completed execution
 
         Returns:
-            Number of variables cleared
+            List of variable names that were cleared
         """
-        if not self.memory_manager.config.auto_clear_enabled:
-            return 0
+        if (
+            not self.memory_manager.config.auto_clear_enabled
+            or not self.memory_manager.config.enabled
+        ):
+            return []
 
-        cleared_count = 0
         variables_to_clear = []
 
         for var_name in self._variables.keys():
-            required_by = required_by_map.get(var_name, set())
+            required_by = inverted_dependency_map.get(var_name, set())
             if self.memory_manager.can_clear_variable(var_name, required_by, completed_stages):
                 variables_to_clear.append(var_name)
 
+        variables_cleared = []
         for var_name in variables_to_clear:
             if self.clear_variable(var_name):
-                cleared_count += 1
+                variables_cleared.append(var_name)
 
-        return cleared_count
+        return variables_cleared
 
     def get_memory_summary(self) -> Dict[str, Any]:
         """Get a summary of current memory usage.

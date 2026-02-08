@@ -29,22 +29,32 @@ Example:
 """
 
 from dataclasses import dataclass
-from typing import Type, TypeVar
+from typing import Callable, Dict, Optional, Type, TypeVar, overload
 
 from typing_extensions import dataclass_transform
 
 _T = TypeVar("_T")
 
-_INST = TypeVar("_INST", bound="AutoDataClass")
+
+@overload
+def autodataclass(cls: Type[_T]) -> Type[_T]: ...
+
+
+@overload
+def autodataclass(*, frozen: bool = True) -> Callable[[Type[_T]], Type[_T]]: ...
 
 
 @dataclass_transform(kw_only_default=True, field_specifiers=())
-def autodataclass(cls: Type[_T]) -> Type[_T]:
+def autodataclass(
+    cls: Optional[Type[_T]] = None,
+    *,
+    frozen: bool = True,
+) -> Type[_T] | Callable[[Type[_T]], Type[_T]]:
     """Decorator that creates an immutable, slotted, keyword-only dataclass.
 
     This decorator applies Python's @dataclass with optimized settings:
     - slots=True: Uses __slots__ for memory efficiency and faster attribute access
-    - frozen=True: Makes instances immutable after creation
+    - frozen=True (default): Makes instances immutable after creation
     - kw_only=True: Requires all arguments to be passed as keyword arguments
 
     The @dataclass_transform decorator provides IDE support for type checking
@@ -53,9 +63,11 @@ def autodataclass(cls: Type[_T]) -> Type[_T]:
 
     Args:
         cls: The class to transform into a dataclass.
+        frozen: Whether to make instances immutable. Defaults to True.
 
     Returns:
-        The same class, transformed into an immutable, slotted dataclass.
+        The same class, transformed into a slotted dataclass, or a decorator
+        function if called with parameters.
 
     Example:
         >>> @autodataclass
@@ -71,13 +83,30 @@ def autodataclass(cls: Type[_T]) -> Type[_T]:
         >>> person.email
         'unknown@example.com'
 
+    Example with frozen=False:
+        >>> @autodataclass(frozen=False)
+        >>> class MutablePerson:
+        ...     name: str
+        ...     age: int
+        ...
+        >>> person = MutablePerson(name="Bob", age=25)
+        >>> person.age = 26  # This works now
+        >>> person.age
+        26
+
     Note:
-        - All instances are immutable (frozen) after creation
+        - By default, instances are immutable (frozen) after creation
         - Memory usage is reduced compared to regular classes due to __slots__
         - All constructor arguments must be passed as keyword arguments
         - Inheritance from slotted classes requires careful handling of __slots__
     """
-    return dataclass(cls, slots=True, frozen=True, kw_only=True)
+
+    def decorator(cls: Type[_T]) -> Type[_T]:
+        return dataclass(cls, slots=True, frozen=frozen, kw_only=True)
+
+    if cls is None:
+        return decorator
+    return decorator(cls)
 
 
 @autodataclass
@@ -160,7 +189,7 @@ class AutoDataClass:
         - The to_dict() method uses __slots__ for efficient serialization
     """
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, object]:
         """Serialize the dataclass instance to a dictionary.
 
         Converts all attributes of the dataclass to a dictionary representation.

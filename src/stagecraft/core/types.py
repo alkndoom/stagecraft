@@ -8,7 +8,7 @@ T = TypeVar("T")
 
 NDArrayGen: TypeAlias = NDArray[np.generic]
 NDArrayStr: TypeAlias = NDArray[np.str_]
-NDArrayBool: TypeAlias = NDArray[np.bool]
+NDArrayBool: TypeAlias = NDArray[np.bool_]
 
 NDArrayInt8: TypeAlias = NDArray[np.int8]
 NDArrayInt16: TypeAlias = NDArray[np.int16]

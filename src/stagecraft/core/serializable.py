@@ -1,16 +1,17 @@
-from __future__ import annotations
+from datetime import datetime
+from typing import Any, Dict, Mapping, Protocol, Type, TypeVar
 
-from typing import TYPE_CHECKING, Any, Dict, Type, TypeVar
-
+import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 from .str import snake_to_camel_case
 
-if TYPE_CHECKING:
-    pass
+_SERIALIZABLE = TypeVar("_SERIALIZABLE", bound="Serializable")
 
-SERIALIZABLE = TypeVar("SERIALIZABLE", bound="Serializable")
+
+class DictSerializable(Protocol):
+    def to_dict(self, *, convert_keys: bool = False) -> Dict[str, Any]: ...
 
 
 class Serializable(BaseModel):
@@ -18,10 +19,21 @@ class Serializable(BaseModel):
         alias_generator=snake_to_camel_case,
         populate_by_name=True,
         arbitrary_types_allowed=True,
-        json_encoders={pd.DataFrame: lambda df: df.to_dict("records")},
+        json_encoders={
+            pd.DataFrame: lambda df: df.to_dict("records"),
+            pd.Series: lambda ser: ser.to_list(),
+            np.ndarray: lambda arr: arr.tolist(),
+            DictSerializable: lambda obj: obj.to_dict(),
+        },
         ser_json_timedelta="iso8601",
         ser_json_bytes="base64",
     )
+
+    @field_serializer("*", check_fields=False)
+    def serialize_datetime(self, value):
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        return value
 
     def to_dict(self, *, convert_keys: bool = False) -> Dict[str, Any]:
         """
@@ -32,14 +44,39 @@ class Serializable(BaseModel):
         """
         if convert_keys:
             return self.model_dump(by_alias=True)
-        return self.model_dump()
+        return self.model_dump(by_alias=False)
 
     @classmethod
-    def from_dict(cls: Type[SERIALIZABLE], _dict: Dict[str, Any]) -> SERIALIZABLE:
+    def from_dict(
+        cls: Type[_SERIALIZABLE],
+        data: Mapping[str, Any],
+        *,
+        convert_keys: bool = False,
+    ) -> _SERIALIZABLE:
         """
         Deserialize object from Python dictionary.
 
         Args:
-            _dict: Dictionary to deserialize from
+            data: Dictionary to deserialize from
+            convert_keys: Convert keys from camelCase (JSON standard)
         """
-        return cls.model_validate(_dict)
+        return cls.model_validate(data, by_alias=convert_keys, by_name=True)
+
+
+class FrozenSerializable(Serializable):
+    """Immutable version of Serializable."""
+
+    model_config = ConfigDict(
+        frozen=True,
+        alias_generator=snake_to_camel_case,
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={
+            pd.DataFrame: lambda df: df.to_dict("records"),
+            pd.Series: lambda ser: ser.to_list(),
+            np.ndarray: lambda arr: arr.tolist(),
+            DictSerializable: lambda obj: obj.to_dict(),
+        },
+        ser_json_timedelta="iso8601",
+        ser_json_bytes="base64",
+    )

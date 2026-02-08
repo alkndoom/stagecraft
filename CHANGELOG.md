@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-02-08
+
+### Added
+
+- Added optional frozen option to autodataclass decorator
+- Added numerical highlighting to logger output
+- Added FrozenSerializable class
+- Added default values for nullable decorator
+- Added "NeverExecute, and VariableCondition" StageCondition classes
+- Added dependency maps to PipelineDefinition and invert_dependency_map function
+- Introduced SValuable and resolve_svaluable, which uses stage itself in case of callable default values
+- Added StageLoop class to execute a group of stages in a loop
+- Added sub-stage support in ETLStage classes
+
+### Changed
+
+- Allowed stage values (SVar's, DataSource's, etc.) to have dynamic default values based on the stage properties
+- Overall improvements in default values handling
+- Overall PipelineRunner improvements
+- DFVarSchema.to_dict() is now called DFVarSchema.to_vect_dict() to avoid confusion with the AutoDataClass().to_dict() method
+- Overall ETLStage improvements with sub-stages, loops, hierarchy, and dependency support
+
 ## [0.1.6] - 2026-01-30
 
 ### Added
@@ -107,6 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.9+ support
 - Apache-2.0 license
 
+[0.1.7]: https://github.com/alkndoom/stagecraft/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/alkndoom/stagecraft/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/alkndoom/stagecraft/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/alkndoom/stagecraft/compare/v0.1.3...v0.1.4

@@ -7,7 +7,9 @@ from typing import (
     ClassVar,
     Dict,
     List,
+    Mapping,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -28,10 +30,12 @@ from ..core.dataclass import AutoDataClass, autodataclass
 from ..core.pandera import PaConfig, PaDataFrame, PaDataFrameModel
 from ..core.types import NDArrayGen
 
+Indexable = Union[NDArrayGen, Sequence[Any]]
+
 _SCHEMA = TypeVar("_SCHEMA", bound="DFVarSchema")
 
 
-_SCHEMA_CACHE: Dict[str, Tuple[Type[PaDataFrameModel], pa_arrow.Schema, Dict[str, List[str]]]] = {}
+_SCHEMA_CACHE: Dict[str, Tuple[Type[PaDataFrameModel], Dict[str, List[str]]]] = {}
 
 
 def _schema_signature(fields: List[Tuple]) -> str:
@@ -45,9 +49,7 @@ def _collect_annotations(cls: Type) -> Dict[str, object]:
         if issubclass(base, DFVarSchema):
             merged.update(get_type_hints(base, include_extras=True))
     merged = {
-        k: v
-        for k, v in merged.items()
-        if (not k.startswith("_") and (k not in ("M", "A", "dtypes")))
+        k: v for k, v in merged.items() if (not k.startswith("_") and (k not in ("M", "dtypes")))
     }
     return merged
 
@@ -93,7 +95,7 @@ def _standardize_dtype(tp: Type, nullable: bool) -> str:
         return "Int64" if nullable else "int64"
     elif tp in (float, np.floating):
         return "Float64" if nullable else "float64"
-    elif tp in (bool, np.bool):
+    elif tp in (bool, np.bool_):
         return "Boolean" if nullable else "boolean"
     elif tp in (str, np.str_):
         return "String" if nullable else "string"
@@ -128,8 +130,8 @@ def _model_to_arrow(model: Type[PaDataFrameModel]) -> pa_arrow.Schema:
 class DFVarSchema(AutoDataClass):
 
     M: ClassVar[Type[PaDataFrameModel]] = field(init=False, repr=False)
-    A: ClassVar[pa_arrow.Schema] = field(init=False, repr=False)
     dtypes: ClassVar[Dict[str, Any]] = field(init=False, repr=False)
+    __arrow_schema: ClassVar[pa_arrow.Schema] = field(init=False, repr=False)
 
     def __init_subclass__(
         cls,
@@ -174,7 +176,7 @@ class DFVarSchema(AutoDataClass):
 
         sig = _schema_signature(signature_fields)
         if sig in _SCHEMA_CACHE:
-            cls.M, cls.A, cls.dtypes = _SCHEMA_CACHE[sig]
+            cls.M, cls.dtypes = _SCHEMA_CACHE[sig]
             return
 
         cls.M = type(
@@ -186,42 +188,64 @@ class DFVarSchema(AutoDataClass):
                 "Config": type("Config", (BaseConfig,), {**config.get_pandera_config_dict()}),
             },
         )
-        cls.A = _model_to_arrow(cls.M)
         cls.dtypes = dtypes
-        _SCHEMA_CACHE[sig] = (cls.M, cls.A, cls.dtypes)
+        _SCHEMA_CACHE[sig] = (cls.M, cls.dtypes)
+
+    @classmethod
+    def to_arrow(cls: Type[_SCHEMA]) -> pa_arrow.Schema:
+        if not hasattr(cls, "__arrow_schema"):
+            cls.__arrow_schema = _model_to_arrow(cls.M)
+        return cls.__arrow_schema
 
     @staticmethod
-    def to_dict(instances: List[_SCHEMA]) -> Dict[str, NDArrayGen]:
-        if not instances:
+    def to_vect_dict(instance: Union[_SCHEMA, List[_SCHEMA]]) -> Dict[str, NDArrayGen]:
+        if not isinstance(instance, list):
+            instance = [instance]
+        if not instance:
             return {}
 
-        cls = type(instances[0])
+        cls = type(instance[0])
         slot_names = cls.__slots__  # type: ignore
         result = {}
-        n = len(instances)
+        n = len(instance)
 
         for name in slot_names:
             dtype = cls.dtypes.get(name, None)
 
             if dtype and dtype[0] in ("int64", "Int64"):
                 col = np.empty(n, dtype=np.int64)
-                col = np.array([getattr(inst, name) for inst in instances], dtype=np.int64)
+                col = np.array([getattr(inst, name) for inst in instance], dtype=np.int64)
             elif dtype and dtype[0] in ("float64", "Float64"):
                 col = np.empty(n, dtype=np.float64)
-                col = np.array([getattr(inst, name) for inst in instances], dtype=np.float64)
+                col = np.array([getattr(inst, name) for inst in instance], dtype=np.float64)
             elif dtype and dtype[0] in ("boolean", "Boolean"):
-                col = np.empty(n, dtype=np.bool)
-                col = np.array([getattr(inst, name) for inst in instances], dtype=np.bool)
+                col = np.empty(n, dtype=np.bool_)
+                col = np.array([getattr(inst, name) for inst in instance], dtype=np.bool_)
             elif dtype and dtype[0] in ("string", "String"):
                 col = np.empty(n, dtype=np.str_)
-                col = np.array([getattr(inst, name) for inst in instances], dtype=np.str_)
+                col = np.array([getattr(inst, name) for inst in instance], dtype=np.str_)
             else:
                 col = np.empty(n, dtype=object)
-                col = np.array([getattr(inst, name) for inst in instances], dtype=object)
+                col = np.array([getattr(inst, name) for inst in instance], dtype=object)
 
             result[name] = col
         return result
 
+    @classmethod
+    def from_dict(cls: Type[_SCHEMA], data: Mapping[str, Indexable]) -> List[_SCHEMA]:
+        if not data:
+            return []
+
+        cols = tuple(data.keys())
+        n = len(data[cols[0]])
+
+        return [cls(**{col: data[col][i] for col in cols}) for i in range(n)]
+
     @staticmethod
-    def to_dataframe(instances: List[_SCHEMA]) -> PaDataFrame[_SCHEMA]:
-        return PaDataFrame[_SCHEMA](DFVarSchema.to_dict(instances))
+    def to_dataframe(instance: Union[_SCHEMA, List[_SCHEMA]]) -> PaDataFrame[_SCHEMA]:
+        return PaDataFrame[_SCHEMA](DFVarSchema.to_vect_dict(instance))
+
+    @classmethod
+    def from_dataframe(cls: Type[_SCHEMA], df: PaDataFrame[_SCHEMA]) -> List[_SCHEMA]:
+        data = {col: df[col].to_numpy() for col in df.columns}
+        return cls.from_dict(data)

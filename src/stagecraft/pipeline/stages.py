@@ -29,15 +29,24 @@ Example:
 
 from __future__ import annotations
 
+import inspect
+import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set, Union
 
 from ..core.wrappers import exceptional
-from .conditions import AlwaysExecute, StageCondition
+from .conditions import AlwaysExecute, NeverExecute, StageCondition, VariableCondition
 from .context import PipelineContext
+from .helpers import SValuable, resolve_svaluable
 from .markers import IOMarker
 from .pipeline_metadata import StageMetadata, StageParameter
 from .variables import SVar
+
+logger = logging.getLogger(__name__)
+
+
+StageHierarchy = Dict[str, "StageHierarchy"]
 
 
 class ETLStage(ABC):
@@ -66,6 +75,16 @@ class ETLStage(ABC):
         context: The pipeline context for variable storage and retrieval.
         parameters: List of configurable parameters for the stage.
         condition: Condition determining whether the stage should execute.
+        _condition: Internal representation of the execution condition, resolved during execution.
+        hierarchy: Dictionary representing the stage hierarchy, with stage names as keys.
+        dependencies: Set of variable names that this stage depends on.
+        sub_stages: List of all sub-stages in the hierarchy (parent + all nested sub-stages + loop stages).
+        start_time: The start time of the stage execution.
+        end_time: The end time of the stage execution.
+        execution_metadata: Dictionary for storing any additional metadata.
+        _child_stages: List of child stages to be executed as part of this stage.
+        _stage_depth: Depth of this stage in the pipeline hierarchy.
+        _pending_variables: List of variables declared as class attributes but not yet registered.
         _input_keys: List of variable names marked as inputs.
         _output_keys: List of variable names marked as outputs.
         _dynamic_props: Internal mapping for dynamic property access.
@@ -90,7 +109,7 @@ class ETLStage(ABC):
         description: Optional[str] = None,
         context: Optional[PipelineContext] = None,
         parameters: Optional[List[StageParameter]] = None,
-        condition: Optional[StageCondition] = None,
+        condition: Optional[Union[str, SValuable[StageCondition], SValuable[bool]]] = None,
     ):
         """Initialize an ETL stage.
 
@@ -110,15 +129,49 @@ class ETLStage(ABC):
         """
         self.name = name or self.__class__.__name__
         self.description = description
-        self.context = context
+        self.context = context or PipelineContext()
         self.parameters = parameters or []
-        self.condition: StageCondition = condition or getattr(
-            self.__class__, "condition", AlwaysExecute()
-        )
+        self.condition: StageCondition = getattr(self.__class__, "condition", AlwaysExecute())
+        self._condition = condition
+        self.hierarchy: StageHierarchy = {}
+        self.dependencies: Set[str] = set()
+        self.sub_stages: List[ETLStage] = []
+        self.start_time: Optional[datetime] = None
+        self.end_time: Optional[datetime] = None
+        self.execution_metadata: Dict[str, Any] = {}
+        self._child_stages: List[ETLStage] = []
+        self._stage_depth: int = 0
         self._input_keys: List[str] = []
         self._output_keys: List[str] = []
         self._dynamic_props: Dict[str, Dict[str, Any]] = {}
+        self.__inject_pending_sub_stages()
         self.__inject_pending_variables()
+        self.sub_stages = self.collect_all_stages()
+        self.set_context(self.context)
+        self.__resolve_hierarchy()
+        self.__resolve_dependencies()
+
+    @property
+    def all_stages(self) -> List[ETLStage]:
+        return [self] + self.sub_stages
+
+    def __inject_pending_sub_stages(self):
+        """Inject any pending subclass stages.
+
+        This internal method processes any subclass variables that need to be
+        registered with the stage. It's called during __init__ to ensure all
+        subclass variables are properly set up.
+
+        Note:
+            This is an internal method and should not be called directly.
+        """
+        for name, obj in inspect.getmembers(self.__class__):
+            if inspect.isclass(obj) and issubclass(obj, ETLStage) and obj is not ETLStage:
+                stage = obj()
+                stage.name = stage.name or stage.__class__.__name__
+                stage.parameters = self.parameters
+                stage._stage_depth = self._stage_depth + 1
+                self._child_stages.append(stage)
 
     def __inject_pending_variables(self):
         """Inject variables that were declared as class attributes.
@@ -136,6 +189,43 @@ class ETLStage(ABC):
         while self._pending_variables:  # type: ignore
             var, markers = self._pending_variables.pop(0)  # type: ignore
             self.add_variable(var, markers)
+
+    def collect_all_stages(self) -> List[ETLStage]:
+        stages = self.sub_stages or []
+        for sub_stage in self._child_stages:
+            stages.extend(sub_stage.all_stages)
+        return stages
+
+    def __resolve_hierarchy(self):
+        """Recursively resolve the stage hierarchy for a given stage.
+
+        This method traverses the stage hierarchy to collect all sub-stages,
+        including nested sub-stages at any depth. This is used for dependency
+        tracking and memory management to ensure all stages are accounted for.
+
+        Note:
+            This is an internal method and should not be called directly.
+        """
+        hierarchy: StageHierarchy = {}
+        for sub_stage in self.sub_stages:
+            hierarchy[sub_stage.name] = sub_stage.hierarchy
+        self.hierarchy = hierarchy
+
+    def __resolve_dependencies(self):
+        """Recursively resolve the dependencies for a given stage.
+
+        This method traverses the stage hierarchy to collect all dependencies,
+        including nested dependencies at any depth. This is used for dependency
+        tracking and memory management to ensure all stages are accounted for.
+
+        Note:
+            This is an internal method and should not be called directly.
+        """
+        dependencies: Set[str] = set()
+        dependencies.update(self._input_keys)
+        for sub_stage in self.sub_stages:
+            dependencies.update(sub_stage.dependencies)
+        self.dependencies = dependencies
 
     def set_context(self, context: PipelineContext):
         """Inject or replace the pipeline context for this stage.
@@ -159,6 +249,8 @@ class ETLStage(ABC):
             raise ValueError(f"Cannot set None as context for stage '{self.name}'")
 
         self.context = context
+        for sub_stage in self.sub_stages:
+            sub_stage.set_context(context)
 
     def add_consumed(self, *var: SVar):
         """Add one or more variables as inputs (consumed) to this stage.
@@ -229,28 +321,29 @@ class ETLStage(ABC):
             functions (sconsume, sproduce, stransform) and should rarely be
             called directly.
         """
+        if not var.name:
+            raise ValueError(
+                "Variable name is not set. Ensure the variable is properly initialized in a class."
+            )
+
         for marker in markers:
             if marker == IOMarker.INPUT:
                 self._input_keys.append(var.name)
+                self.dependencies.add(var.name)
             elif marker == IOMarker.OUTPUT:
                 self._output_keys.append(var.name)
             else:
                 raise ValueError(f"Invalid variable marker: {marker}")
 
-        name = var.name
-        if not name:
-            raise ValueError(
-                "Variable name is not set. Ensure the variable is properly initialized in a class."
-            )
-
         var.set_stage(self)
-        self._dynamic_props[name] = {
+        self._dynamic_props[var.name] = {
             "getter": var.get,
             "setter": var.set,
             "deleter": var.delete,
             "loader": var.load,
             "saver": var.save,
             "source": var.source,
+            "_value": var._value,
         }
 
     def load_inputs(self):
@@ -316,20 +409,6 @@ class ETLStage(ABC):
                 f"Original error: {str(e)}"
             ) from e
 
-    def __clear_variables(self):
-        """Clear all variables from memory after stage execution.
-
-        This internal method removes all variable references to allow garbage
-        collection. It's called automatically at the end of execute() to
-        prevent memory leaks in long-running pipelines.
-
-        Note:
-            This is an internal method and should not be called directly.
-        """
-        self._input_keys.clear()
-        self._output_keys.clear()
-        self._dynamic_props.clear()
-
     def should_execute(self) -> bool:
         """Check if this stage should execute based on its condition.
 
@@ -358,7 +437,9 @@ class ETLStage(ABC):
         """
         if self.context is None:
             return True
-
+        for sub_stage in self.sub_stages:
+            if not sub_stage.should_execute():
+                return False
         return self.condition.should_execute(self.context, self.name)
 
     def get_skip_reason(self) -> str:
@@ -376,9 +457,21 @@ class ETLStage(ABC):
             ...     reason = stage.get_skip_reason()
             ...     logger.info(f"Skipping {stage.name}: {reason}")
         """
+        for sub_stage in self.sub_stages:
+            if not sub_stage.should_execute():
+                return sub_stage.get_skip_reason()
         return self.condition.get_skip_reason()
 
-    def execute(self):
+    def _resolve_condition(self):
+        if isinstance(self._condition, str):
+            condition = VariableCondition(self._condition)
+        else:
+            condition = resolve_svaluable(self._condition, self)
+            if isinstance(condition, bool):
+                condition = AlwaysExecute() if condition else NeverExecute()
+        self.condition = condition or self.condition or AlwaysExecute()
+
+    def execute(self) -> bool:
         """Execute the complete stage lifecycle.
 
         This method orchestrates the full execution of the stage:
@@ -401,21 +494,33 @@ class ETLStage(ABC):
             This method is typically called by the pipeline runner rather than
             directly. For standalone execution, ensure the context is set first.
         """
-        if self.context is None:
-            self.set_context(PipelineContext())
-
         try:
+            if self.context is None:
+                self.set_context(PipelineContext())
+
+            self._resolve_condition()
+
+            if not self.should_execute():
+                return False
+
+            logger.info(f"Executing stage '{self.name}'")
+            self.start_time = datetime.now()
             self.load_inputs()
             parameter_dict = {param.name: param.value for param in self.parameters}
             self.__safe_recipe(**parameter_dict)
             self.save_outputs()
+
+            for child_stage in self._child_stages:
+                child_stage.execute()
+
+            self.end_time = datetime.now()
         except Exception as e:
             raise RuntimeError(
                 f"Stage '{self.name}' execution failed. "
                 f"Check the stage's recipe() method and input/output variables.\n"
                 f"Original error: {str(e)}"
             ) from e
-        self.__clear_variables()
+        return True
 
     @abstractmethod
     def recipe(self, **kwargs):
@@ -466,7 +571,7 @@ class ETLStage(ABC):
         self.recipe(**kwargs)
 
     def get_metadata(self) -> StageMetadata:
-        """Get metadata describing this stage's configuration.
+        """Get metadata describing this stage's configuration and sub-stages.
 
         This method generates a StageMetadata object containing information
         about the stage's name and parameters. Metadata is used for:
@@ -488,7 +593,15 @@ class ETLStage(ABC):
             >>> print(metadata.parameters[0].name)
             threshold
         """
-        return StageMetadata(name=self.name, parameters=self.parameters)
+        metadata = StageMetadata(name=self.name, parameters=self.parameters)
+
+        for sub_stage in self.sub_stages:
+            metadata.sub_stages.append(sub_stage.get_metadata())
+
+        if self.condition:
+            metadata.condition = self.condition
+
+        return metadata
 
     def __getattr__(self, item):
         """Enable dynamic property access for stage variables.

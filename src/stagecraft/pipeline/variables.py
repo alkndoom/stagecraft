@@ -40,9 +40,8 @@ Example:
 
 from __future__ import annotations
 
-import inspect
 import logging
-from typing import TYPE_CHECKING, Callable, Generic, List, Optional, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Callable, Generic, List, Optional, Type, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -50,6 +49,7 @@ import pandas as pd
 from ..core.pandera import PaDataFrame, PaDataFrameModel
 from .context import PipelineContext
 from .data_source import ArraySource, CSVSource, DataSource
+from .helpers import SValuable, resolve_svaluable
 from .markers import IOMarker
 from .schemas import DFVarSchema
 
@@ -57,29 +57,10 @@ if TYPE_CHECKING:
     from .stages import ETLStage
 
 _T = TypeVar("_T")
-_R = TypeVar("_R")
 _SCHEMA = TypeVar("_SCHEMA", bound=DFVarSchema)
 
-SValuable = Union[_R, Callable[[], _R], Callable[["ETLStage"], _R]]
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_svaluable(
-    value: Optional[SValuable[_T]],
-    stage: Optional["ETLStage"] = None,
-) -> Optional[_T]:
-    if value is None:
-        return None
-    if callable(value):
-        sig = inspect.signature(value)
-        if len(sig.parameters) == 0:
-            return value()  # type: ignore[return-value]
-        elif stage is None:
-            raise ValueError("Cannot resolve SValuable because stage parameter is None.")
-        else:
-            return value(stage)  # type: ignore[return-value]
-    return value
 
 
 class SVar(Generic[_T]):
@@ -95,6 +76,7 @@ class SVar(Generic[_T]):
 
     Attributes:
         value: The current value of the variable.
+        _value: The default value or factory callable for the variable.
         stage: The ETLStage instance that owns this variable (set by ETLStage).
         context: The pipeline context for loading/saving data, accessed through the stage (set by PipelineRunner).
         name: The variable name as defined on the stage class.
@@ -103,10 +85,12 @@ class SVar(Generic[_T]):
         description: Human-readable description of the variable's purpose.
         pre_processing: Optional transformation applied to values before storage.
         markers: List of IOMarkers for input/output classification.
+        force_overwrite: If True, value or source will overwrite the value in the context even if it already exists.
     """
 
     name: str
     stage: Optional["ETLStage"] = None
+    source: Optional[DataSource] = None
     value: Optional[_T] = None
 
     @property
@@ -119,7 +103,8 @@ class SVar(Generic[_T]):
         /,
         *,
         value: Optional[SValuable[_T]] = None,
-        source: Optional[SValuable[DataSource]] = None,
+        source: Optional[DataSource] = None,
+        force_overwrite: bool = False,
         description: Optional[str] = None,
         pre_processing: Optional[Callable[[_T], _T]] = None,
         markers: Optional[List[IOMarker]] = None,
@@ -131,6 +116,7 @@ class SVar(Generic[_T]):
             type_: The expected type of the variable value.
             value: Optional static default value or factory callable.
             source: Optional static default data source or factory callable for loading/saving the variable value.
+            force_overwrite: If True, value or source will overwrite the value in the context even if it already exists.
             description: Human-readable description of the variable's purpose.
             pre_processing: Optional transformation function applied to values before
                 they are stored in the variable.
@@ -144,7 +130,8 @@ class SVar(Generic[_T]):
         self.description = description
         self.pre_processing = pre_processing
         self.markers = markers or []
-        self.__value__ = value
+        self._value = value
+        self.force_overwrite = force_overwrite
 
     def set_stage(self, stage: ETLStage):
         """
@@ -223,15 +210,21 @@ class SVar(Generic[_T]):
             )
 
         try:
-            # First, try to resolve the default/factory value
-            value = resolve_svaluable(self.__value__, self.stage)
-
-            # Next, try to load from context if value is still None
-            if value is None and self.context is not None:
+            value = None
+            # First, try to load from context
+            if self.context is not None:
                 value = self.context.get(self.name, None)
 
+            # Next, try to resolve the default/factory value if value is still None
+            if (value is None or self.force_overwrite) and self._value is not None:
+                value = resolve_svaluable(self._value, self.stage)
+
             # Finally, try to load from source if value is still None
-            if value is None and self.source and self.source.load_enabled:
+            if (value is None or self.force_overwrite) and self.source and self.source.load_enabled:
+                if getattr(self.source, "path", None) is None and hasattr(
+                    self.source, "_resolve_path"
+                ):
+                    self.source._resolve_path(self.stage)  # type: ignore
                 value = self.source.load()
 
             # If we have a value, apply preprocessing and store it
@@ -276,6 +269,10 @@ class SVar(Generic[_T]):
             if self.context is not None:
                 self.context.set(self.name, self.value)
             if self.value is not None and self.source is not None and self.source.save_enabled:
+                if getattr(self.source, "path", None) is None and hasattr(
+                    self.source, "_resolve_path"
+                ):
+                    self.source._resolve_path(self.stage)  # type: ignore
                 self.source.save(self.value)
         except Exception as e:
             raise RuntimeError(
@@ -364,19 +361,6 @@ class SVar(Generic[_T]):
         self.set_markers([IOMarker.INPUT])
         return self  # type: ignore[return-value]
 
-    def sproduce(self) -> _T:
-        """Mark this variable as an output (produced) by the stage.
-
-        Returns:
-            Self for method chaining.
-
-        Example:
-            >>> var = SVar(pd.DataFrame).sproduce()
-            >>> # Equivalent to using sproduce() descriptor function
-        """
-        self.set_markers([IOMarker.OUTPUT])
-        return self  # type: ignore[return-value]
-
     def stransform(self) -> _T:
         """Mark this variable as both input and output (transformed) by the stage.
 
@@ -388,6 +372,19 @@ class SVar(Generic[_T]):
             >>> # Equivalent to using stransform() descriptor function
         """
         self.set_markers([IOMarker.INPUT, IOMarker.OUTPUT])
+        return self  # type: ignore[return-value]
+
+    def sproduce(self) -> _T:
+        """Mark this variable as an output (produced) by the stage.
+
+        Returns:
+            Self for method chaining.
+
+        Example:
+            >>> var = SVar(pd.DataFrame).sproduce()
+            >>> # Equivalent to using sproduce() descriptor function
+        """
+        self.set_markers([IOMarker.OUTPUT])
         return self  # type: ignore[return-value]
 
     def __get__(self, instance, owner):
@@ -593,6 +590,7 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
     """
 
     schema: Optional[Type[_SCHEMA]]
+    source: Optional[CSVSource]
 
     def __init__(
         self,
@@ -600,7 +598,8 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
         /,
         *,
         value: Optional[SValuable[PaDataFrame[_SCHEMA]]] = None,
-        source: Optional[SValuable[CSVSource]] = None,
+        source: Optional[CSVSource] = None,
+        force_overwrite: bool = False,
         description: Optional[str] = None,
         pre_processing: Optional[Callable[[PaDataFrame[_SCHEMA]], PaDataFrame[_SCHEMA]]] = None,
         markers: Optional[List[IOMarker]] = None,
@@ -613,6 +612,7 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
                    whenever validate() is called.
             value: Optional static default DataFrame or factory callable.
             source: Optional static default CSV source or factory callable for loading/saving the DataFrame.
+            force_overwrite: If True, value or source will overwrite the value in the context even if it already exists.
             description: Optional human-readable description of the DataFrame's purpose.
             pre_processing: Optional transformation function applied to the DataFrame
                           before it is stored in the variable.
@@ -642,6 +642,7 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
             PaDataFrame[_SCHEMA],
             value=value,
             source=source,
+            force_overwrite=force_overwrite,
             description=description,
             pre_processing=pre_processing,
             markers=markers,
@@ -763,12 +764,14 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
     """
 
     shape: Optional[tuple]
+    source: Optional[ArraySource]
 
     def __init__(
         self,
         *,
         value: Optional[SValuable[np.ndarray]] = None,
-        source: Optional[SValuable[ArraySource]] = None,
+        source: Optional[ArraySource] = None,
+        force_overwrite: bool = False,
         description: Optional[str] = None,
         pre_processing: Optional[Callable[[np.ndarray], np.ndarray]] = None,
         shape: Optional[tuple] = None,
@@ -779,6 +782,7 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
         Args:
             value: Optional static default NumPy array or factory callable.
             source: Optional static default ArraySource or factory callable for loading/saving the array to .npy files.
+            force_overwrite: If True, value or source will overwrite the value in the context even if it already exists.
             description: Optional human-readable description of the array's purpose.
             pre_processing: Optional transformation function applied to the array
                           before it is stored in the variable.
@@ -812,6 +816,7 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
             np.ndarray,
             value=value,
             source=source,
+            force_overwrite=force_overwrite,
             description=description,
             pre_processing=pre_processing,
             markers=markers,

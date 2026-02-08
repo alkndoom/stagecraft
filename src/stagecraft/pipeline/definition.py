@@ -14,11 +14,31 @@ A pipeline definition is responsible for:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from .data_source import DataSource
 from .pipeline_metadata import PipelineMetadata
 from .stages import ETLStage
+
+
+def invert_dependency_map(stage_to_vars: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
+    """Invert dependency map from stage->vars to var->stages.
+
+    Args:
+        stage_to_vars: Map of stage names to sets of variable names they need
+
+    Returns:
+        Map of variable names to sets of stage names that need them
+    """
+    var_to_stages: Dict[str, Set[str]] = {}
+
+    for stage_name, var_names in stage_to_vars.items():
+        for var_name in var_names:
+            if var_name not in var_to_stages:
+                var_to_stages[var_name] = set()
+            var_to_stages[var_name].add(stage_name)
+
+    return var_to_stages
 
 
 class PipelineDefinition:
@@ -39,6 +59,8 @@ class PipelineDefinition:
     Attributes:
         name: The name of the pipeline, used for identification and logging.
         stages: Ordered list of ETL stages that comprise the pipeline.
+        dependency_map: Internal mapping of stage names to their input dependencies,
+                        used for memory management and debugging.
 
     Example:
         >>> pipeline = PipelineDefinition("data_processing")
@@ -64,6 +86,7 @@ class PipelineDefinition:
         """
         self.name = name
         self.stages: List[ETLStage] = []
+        self.dependency_map: Dict[str, Set[str]] = {}
 
         if stages:
             for stage in stages:
@@ -121,6 +144,7 @@ class PipelineDefinition:
             )
 
         self.stages.append(stage)
+        self.dependency_map[stage.name] = stage.dependencies
         return self
 
     def validate(self, initial_context: Optional[Dict[str, Any]] = None) -> bool:
@@ -178,6 +202,10 @@ class PipelineDefinition:
         1. Already available from previous stages or initial context
         2. Can be loaded from a configured data source
 
+        The method recursively traverses all stages including nested sub-stages
+        to build a complete dependency map. This ensures that variables consumed
+        by sub-stages are properly tracked for memory management.
+
         The method simulates the data flow through the pipeline without actually
         executing any stages, building up the set of available variables as it
         processes each stage's outputs.
@@ -198,22 +226,28 @@ class PipelineDefinition:
             This is a private method called by validate(). It should not be
             called directly by external code.
         """
-
         available_vars = set(initial_context.keys()) if initial_context else set()
 
-        for stage in self.stages:
-            for name in stage._input_keys:
-                var = stage._dynamic_props.get(name)
-                source: Optional[DataSource] = var["source"]  # type: ignore
-                has_loadable_source = source is not None and source.load_enabled  # type: ignore
-                if name not in available_vars and not has_loadable_source:
-                    raise ValueError(
-                        f"Stage '{stage.name}' requires input '{name}' "
-                        f"which is not available. Available: {list(available_vars)}"
-                    )
+        for top_level_stage in self.stages:
+            for stage in top_level_stage.all_stages:
+                for name in stage._input_keys:
+                    var = stage._dynamic_props.get(name)
+                    source: Optional[DataSource] = var["source"]  # type: ignore
+                    has_loadable_source = source is not None and source.load_enabled  # type: ignore
+                    has_resolvable_value = var["_value"] is not None  # type: ignore
+                    if (
+                        name not in available_vars
+                        and not has_loadable_source
+                        and not has_resolvable_value
+                    ):
+                        raise ValueError(
+                            f"Stage '{stage.name}' requires input '{name}' "
+                            f"which is not available. Available: {list(available_vars)}"
+                        )
 
-            for name in stage._output_keys:
-                available_vars.add(name)
+                for name in stage._output_keys:
+                    available_vars.add(name)
+
         return True
 
     def get_metadata(self) -> PipelineMetadata:
@@ -266,4 +300,5 @@ class PipelineDefinition:
         Returns:
             Same as __str__() for this class.
         """
+        return self.__str__()
         return self.__str__()

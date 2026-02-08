@@ -13,7 +13,7 @@ The module includes support for:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -21,6 +21,7 @@ import pandas as pd
 from ..core.csv import read_csv, write_csv
 from ..core.file import read_file, write_file
 from ..core.json import read_json, write_json
+from .helpers import SValuable, resolve_svaluable
 
 
 class DataSource(ABC):
@@ -122,7 +123,7 @@ class _BaseFileSource(DataSource):
         save_enabled: Inherited from DataSource.
     """
 
-    def __init__(self, path: str, /, *, mode: Literal["r", "w", "w+"] = "w+"):
+    def __init__(self, path: SValuable[str], /, *, mode: Literal["r", "w", "w+"] = "w+"):
         """Initialize the file-based data source.
 
         Args:
@@ -136,7 +137,12 @@ class _BaseFileSource(DataSource):
             'data/output.csv'
         """
         super().__init__(mode=mode)
-        self.path = path
+        self.path: Optional[str] = None
+        self.__path = path
+
+    def _resolve_path(self, stage: Any):
+        """Resolve the file path using the stage context."""
+        self.path = resolve_svaluable(self.__path, stage)
 
     def __str__(self):
         """Return a string representation including the file path.
@@ -185,7 +191,7 @@ class CSVSource(_BaseFileSource):
             >>> print(df.shape)
             (1000, 5)
         """
-        if not self.load_enabled:
+        if not self.load_enabled or self.path is None:
             raise ValueError(f"Loading is not enabled for {self}")
         return read_csv(self.path)
 
@@ -204,7 +210,7 @@ class CSVSource(_BaseFileSource):
             >>> df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
             >>> source.save(df)
         """
-        if self.save_enabled:
+        if self.save_enabled and self.path is not None:
             write_csv(value, self.path)
 
 
@@ -247,7 +253,7 @@ class JSONSource(_BaseFileSource):
             >>> print(config.keys())
             dict_keys(['model', 'training', 'evaluation'])
         """
-        if not self.load_enabled:
+        if not self.load_enabled or self.path is None:
             raise ValueError(f"Loading is not enabled for {self}")
         return read_json(self.path)
 
@@ -266,7 +272,7 @@ class JSONSource(_BaseFileSource):
             >>> data = {"status": "complete", "count": 42}
             >>> source.save(data)
         """
-        if self.save_enabled:
+        if self.save_enabled and self.path is not None:
             write_json(value, self.path)
 
 
@@ -312,7 +318,7 @@ class FileSource(_BaseFileSource):
             >>> print(len(content))
             1523
         """
-        if not self.load_enabled:
+        if not self.load_enabled or self.path is None:
             raise ValueError(f"Loading is not enabled for {self}")
         return read_file(self.path)
 
@@ -336,7 +342,7 @@ class FileSource(_BaseFileSource):
             >>> # Can save any object with __str__
             >>> source.save({"status": "done"})  # Saves string representation
         """
-        if self.save_enabled:
+        if self.save_enabled and self.path is not None:
             write_file(str(value), self.path)
 
 
@@ -384,7 +390,7 @@ class ArraySource(_BaseFileSource):
             >>> print(features.dtype, features.shape)
             float64 (500, 10)
         """
-        if not self.load_enabled:
+        if not self.load_enabled or self.path is None:
             raise ValueError(f"Loading is not enabled for {self}")
         return np.load(self.path)
 
@@ -409,5 +415,5 @@ class ArraySource(_BaseFileSource):
             ...                       dtype=[('id', 'i4'), ('value', 'f8')])
             >>> source.save(structured)
         """
-        if self.save_enabled:
+        if self.save_enabled and self.path is not None:
             np.save(self.path, value)
