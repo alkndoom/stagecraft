@@ -3,7 +3,7 @@ import logging
 import os
 from typing import Any, Callable, Dict
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("io")
 
 
 def append_json(

@@ -13,7 +13,7 @@ from .pipeline_metadata import (
 )
 from .stages import ETLStage
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("pipeline")
 
 
 class PipelineRunner:

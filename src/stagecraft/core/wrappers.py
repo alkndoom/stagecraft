@@ -4,7 +4,7 @@ from typing import Any, Callable, Optional, TypeVar, overload
 
 from .exceptions import AppException, CriticalException
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("exceptions")
 
 
 F = TypeVar("F", bound=Callable[..., Any])

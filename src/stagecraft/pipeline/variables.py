@@ -60,7 +60,7 @@ _T = TypeVar("_T")
 _SCHEMA = TypeVar("_SCHEMA", bound=DFVarSchema)
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("variable")
 
 
 class SVar(Generic[_T]):

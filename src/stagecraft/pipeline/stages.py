@@ -43,7 +43,7 @@ from .markers import IOMarker
 from .pipeline_metadata import StageMetadata, StageParameter
 from .variables import SVar
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("stage")
 
 
 StageHierarchy = Dict[str, "StageHierarchy"]
@@ -602,6 +602,29 @@ class ETLStage(ABC):
             metadata.condition = self.condition
 
         return metadata
+
+    def get_parameter(self, name: str) -> StageParameter:
+        """Get a specific parameter by name.
+
+        This method retrieves a parameter from the stage's parameters list by
+        its name. Parameters are used to configure stage behavior at runtime.
+
+        Args:
+            name: The name of the parameter to retrieve.
+
+        Returns:
+            The StageParameter object with the specified name, or None if not found.
+
+        Example:
+            >>> stage = MyStage(parameters=[StageParameter("threshold", 0.5)])
+            >>> param = stage.get_parameter("threshold")
+            >>> print(param.value)
+            0.5
+        """
+        for param in self.parameters:
+            if param.name == name:
+                return param
+        raise ValueError(f"Parameter '{name}' not found in stage '{self.name}'")
 
     def __getattr__(self, item):
         """Enable dynamic property access for stage variables.

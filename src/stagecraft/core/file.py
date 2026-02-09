@@ -1,7 +1,7 @@
 import logging
 import os
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("io")
 
 
 def append_file(content: str, filename: str, verbose: bool = True):

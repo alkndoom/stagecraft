@@ -28,7 +28,7 @@ from stagecraft.pipeline.variables import DFVar
 
 setup_logger()
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("main")
 
 
 @autodataclass

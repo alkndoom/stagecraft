@@ -9,7 +9,7 @@ from .helpers import SValuable
 from .pipeline_metadata import StageParameter
 from .stages import ETLStage
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("loop")
 
 
 class StageLoop(ETLStage):

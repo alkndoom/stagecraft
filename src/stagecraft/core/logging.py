@@ -10,6 +10,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, TextIO
 
+import yaml
+
 from .dataclass import AutoDataClass, autodataclass
 
 
@@ -97,7 +99,8 @@ class LoggingManagerConfig(AutoDataClass):
     also_capture_stdout_stderr: bool = False
 
 
-_std_fmt = "%(asctime)s.%(msecs)03d    [ %(levelname)s ] %(message)s"
+_std_fmt = "%(asctime)s.%(msecs)03d    [ %(levelname)s ] [ %(name)s ] %(message)s"
+_std_date_fmt = "%Y-%m-%d %H:%M:%S"
 
 
 class _ColoredConsoleFormatter(logging.Formatter):
@@ -117,7 +120,7 @@ class _ColoredConsoleFormatter(logging.Formatter):
         utc: bool = False,
     ) -> None:
         fmt = fmt or _std_fmt
-        datefmt = datefmt or "%Y-%m-%d %H:%M:%S"
+        datefmt = datefmt or _std_date_fmt
         super().__init__(fmt=fmt, datefmt=datefmt)
 
         if utc:
@@ -127,12 +130,19 @@ class _ColoredConsoleFormatter(logging.Formatter):
         log_color = self.COLORS.get(record.levelno, ANSIColors.DEFAULT)
         formatted = super().format(record)
 
-        pattern_number = r"( \d+\.?\d* )"
-        pattern = r"color_fmt\(([^,]+),\s*(?:<)?ANSIColors\.(\w+)(?::[^>]+>)?\)"
+        pattern_number = r"(^| )(\d+\.?\d*)( |$)"
+        pattern_color_fmt = r"color_fmt\(([^,]+),\s*(?:<)?ANSIColors\.(\w+)(?::[^>]+>)?\)"
+        pattern_logger_name = r"(    \[[^\]]+\] )(\[[^\]]+\])"
+
+        def replace_newline(match):
+            date_length = formatted.find("[")
+            return f"\n{date_length * ' '}"
 
         def replace_number(match):
-            number = match.group(1)
-            return f"{ANSIColors.DEFAULT.value}{number}{log_color.value}"
+            prefix = match.group(1)
+            number = match.group(2)
+            suffix = match.group(3)
+            return f"{prefix}{ANSIColors.DEFAULT.value}{number}{log_color.value}{suffix}"
 
         def replace_color_fmt(match):
             text = match.group(1)
@@ -143,8 +153,30 @@ class _ColoredConsoleFormatter(logging.Formatter):
             except KeyError:
                 return match.group(0)  # Return original if color not found
 
+        def replace_logger_name(match):
+            prefix = match.group(1)
+            name = match.group(2)
+            return f"{prefix}{ANSIColors.WHITE.value}{name}{log_color.value}"
+
+        context = {}
+        keys = list(record.__dict__.keys())
+        extra_keys = keys[21:-2] if len(keys) > 23 else []
+        if extra_keys:
+            for key in extra_keys:
+                if hasattr(record, key):
+                    context[key] = getattr(record, key)
+            if context:
+                try:
+                    formatted += "\n" + yaml.dump(
+                        context, default_flow_style=False, allow_unicode=True, sort_keys=False
+                    )
+                except Exception:
+                    formatted += f"\n{context}"
+
+        formatted = re.sub(r"\n", replace_newline, formatted)
         formatted = re.sub(pattern_number, replace_number, formatted)
-        formatted = re.sub(pattern, replace_color_fmt, formatted)
+        formatted = re.sub(pattern_color_fmt, replace_color_fmt, formatted)
+        formatted = re.sub(pattern_logger_name, replace_logger_name, formatted)
 
         return f"{log_color.value}{formatted}{ANSIColors.END.value}"
 
@@ -158,11 +190,21 @@ class _SimpleConsoleFormatter(logging.Formatter):
         utc: bool = False,
     ) -> None:
         fmt = fmt or _std_fmt
-        datefmt = datefmt or "%Y-%m-%d %H:%M:%S"
+        datefmt = datefmt or _std_date_fmt
         super().__init__(fmt=fmt, datefmt=datefmt)
 
         if utc:
             self.converter = lambda *args: datetime.now(timezone.utc).timetuple()
+
+    def format(self, record: logging.LogRecord) -> str:
+        formatted = super().format(record)
+
+        def replace_newline(match):
+            date_length = formatted.find("[")
+            return f"{date_length * ' '}\n"
+
+        formatted = re.sub(r"\n", replace_newline, formatted)
+        return formatted
 
 
 class LoggingManager:

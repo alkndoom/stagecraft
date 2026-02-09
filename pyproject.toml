@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stagecraft"
-version = "0.1.7"
+version = "0.1.8"
 description = "A Python library for building robust ETL pipelines with declarative stages and data flow management"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +34,7 @@ dependencies = [
     "numpy>=1.24.0",
     "pandera>=0.17.0",
     "pyarrow>=11.0.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]

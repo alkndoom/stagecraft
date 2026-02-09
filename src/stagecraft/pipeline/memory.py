@@ -33,7 +33,7 @@ import pandas as pd
 
 from ..core.dataclass import AutoDataClass, autodataclass
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("memory")
 
 
 @autodataclass
