@@ -1,4 +1,4 @@
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 from .core.csv import append_csv, read_csv, write_csv
 from .core.dataclass import AutoDataClass, autodataclass

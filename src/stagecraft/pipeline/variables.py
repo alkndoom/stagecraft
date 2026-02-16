@@ -89,13 +89,39 @@ class SVar(Generic[_T]):
     """
 
     name: str
-    stage: Optional["ETLStage"] = None
+    stage: ETLStage
     source: Optional[DataSource] = None
-    value: Optional[_T] = None
 
     @property
-    def context(self) -> Optional[PipelineContext]:
-        return self.stage.context if self.stage is not None else None
+    def value(self) -> Optional[_T]:
+        """Get the current value of the variable from the context.
+
+        Returns:
+            The current value, or None if not set.
+        """
+        return self.get()
+
+    @value.setter
+    def value(self, new_value: Optional[_T]):
+        """Set the value of the variable in the context.
+
+        Args:
+            new_value: The new value to store.
+        """
+        self.set(new_value)
+
+    @value.deleter
+    def value(self):
+        """Delete the variable from context.
+
+        Removes the variable from the context and frees its memory if necessary.
+        """
+        self.delete()
+
+    @property
+    def context(self) -> PipelineContext:
+        assert hasattr(self, "stage"), "Variable must be associated with a stage to access context"
+        return self.stage.context
 
     def __init__(
         self,
@@ -133,7 +159,7 @@ class SVar(Generic[_T]):
         self._value = value
         self.force_overwrite = force_overwrite
 
-    def set_stage(self, stage: ETLStage):
+    def _set_stage(self, stage: ETLStage):
         """
         Associate this variable with a specific pipeline stage.
 
@@ -145,6 +171,7 @@ class SVar(Generic[_T]):
             >>> stage = MyStage()
             >>> var.set_stage(stage)
         """
+        assert stage is not None, "Stage cannot be None"
         self.stage = stage
 
     def set_markers(self, markers: List[IOMarker]):
@@ -204,34 +231,31 @@ class SVar(Generic[_T]):
         the pipeline context using the variable name if context exists. Applies
         preprocessing if configured.
         """
-        if not hasattr(self, "name"):
-            raise ValueError(
-                "Variable name is not set. Ensure the variable is properly initialized in a class."
-            )
+        assert hasattr(self, "stage"), "Variable must be associated with a stage before loading"
+        assert hasattr(
+            self, "name"
+        ), "Variable name is not set. Ensure the variable is properly initialized in a class."
 
         try:
-            value = None
-            # First, try to load from context
-            if self.context is not None:
-                value = self.context.get(self.name, None)
-
             # Next, try to resolve the default/factory value if value is still None
-            if (value is None or self.force_overwrite) and self._value is not None:
-                value = resolve_svaluable(self._value, self.stage)
+            if (self.value is None or self.force_overwrite) and self._value is not None:
+                self.value = resolve_svaluable(self._value, self.stage)
 
             # Finally, try to load from source if value is still None
-            if (value is None or self.force_overwrite) and self.source and self.source.load_enabled:
+            if (
+                (self.value is None or self.force_overwrite)
+                and self.source
+                and self.source.load_enabled
+            ):
                 if getattr(self.source, "path", None) is None and hasattr(
                     self.source, "_resolve_path"
                 ):
                     self.source._resolve_path(self.stage)  # type: ignore
-                value = self.source.load()
+                self.value = self.source.load()
 
             # If we have a value, apply preprocessing and store it
-            if value is not None:
-                if self.pre_processing:
-                    value = self.pre_processing(value)  # type: ignore[arg-type]
-                self.value = value
+            if self.value is not None and self.pre_processing is not None:
+                self.value = self.pre_processing(self.value)  # type: ignore[arg-type]
 
             if self.value is None:
                 logger.warning(
@@ -253,10 +277,10 @@ class SVar(Generic[_T]):
         Always saves to the pipeline context if context exists. If a source is
         configured, also saves to the source (e.g., CSV file, array file).
         """
-        if not hasattr(self, "name"):
-            raise ValueError(
-                "Variable name is not set. Ensure the variable is properly initialized in a class."
-            )
+        assert hasattr(self, "stage"), "Variable must be associated with a stage before saving"
+        assert hasattr(
+            self, "name"
+        ), "Variable name is not set. Ensure the variable is properly initialized in a class."
 
         try:
             if self.value is None:
@@ -266,8 +290,6 @@ class SVar(Generic[_T]):
                     "If intentional, you can ignore this message."
                 )
 
-            if self.context is not None:
-                self.context.set(self.name, self.value)
             if self.value is not None and self.source is not None and self.source.save_enabled:
                 if getattr(self.source, "path", None) is None and hasattr(
                     self.source, "_resolve_path"
@@ -281,14 +303,14 @@ class SVar(Generic[_T]):
                 f"Original error: {str(e)}"
             ) from e
 
-    def get(self) -> _T:
+    def get(self) -> Optional[_T]:
         """
         Get the current value of the variable.
 
         Returns:
             The current value.
         """
-        return self.value  # type: ignore[return-value]
+        return self.context.get(self.name, None)
 
     def set(self, value: Optional[_T]):
         """
@@ -297,16 +319,15 @@ class SVar(Generic[_T]):
         Args:
             value: The new value to store.
         """
-        self.value = value
+        self.context.set(self.name, value)
 
     def delete(self):
         """
-        Delete the variable value from memory.
+        Delete the variable from context.
 
-        Sets the value to None to allow garbage collection.
-        Note: The actual memory cleanup depends on Python's garbage collector.
+        Removes the variable from the context and frees its memory if necessary.
         """
-        self.value = None
+        self.context.delete(self.name)
 
     def validate(self) -> bool:
         """
@@ -316,10 +337,10 @@ class SVar(Generic[_T]):
             True if the value is valid or no type is specified
 
         Raises:
+            AssertionError: If the variable name is not set.
             TypeError: If the value doesn't match the expected type
         """
-        if not hasattr(self, "name"):
-            raise ValueError("Variable name is not set. Cannot validate unnamed variable.")
+        assert hasattr(self, "name"), "Variable name is not set. Cannot validate unnamed variable."
 
         if self.type is None or self.value is None:
             return True
@@ -455,7 +476,7 @@ class SVar(Generic[_T]):
         """Descriptor protocol method for attribute deletion.
 
         This method is called when the variable is deleted as an attribute
-        on a stage instance. It clears the variable's value from memory.
+        on a stage instance. It deletes the variable from context.
 
         Args:
             instance: The stage instance deleting the variable.
@@ -467,7 +488,7 @@ class SVar(Generic[_T]):
             >>> stage = MyStage()
             >>> stage.temp_data = df
             >>> # Deleting stage.temp_data calls __delete__
-            >>> del stage.temp_data  # Clears the value
+            >>> del stage.temp_data  # Deletes the variable
 
         Note:
             This is an internal method called by Python's descriptor protocol.
@@ -664,7 +685,7 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
             True if validation passes.
 
         Raises:
-            ValueError: If the variable has no name.
+            AssertionError: If the variable name is not set.
             TypeError: If the value is not a pandas DataFrame.
             ValueError: If DFVarSchema (Pandera) validation fails. The error message
                        includes details about which columns or constraints failed.
@@ -685,10 +706,7 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
         Note:
             If no schema is provided, only basic DataFrame type checking is performed.
         """
-        if not hasattr(self, "name"):
-            raise ValueError(
-                "Variable name is not set. Cannot validate unnamed DataFrame variable."
-            )
+        super().validate()
 
         if self.value is None:
             return True
@@ -714,6 +732,7 @@ class DFVar(Generic[_SCHEMA], SVar[PaDataFrame[_SCHEMA]]):
                     f"Original error: {str(e)}"
                 ) from e
         return True
+
 
 
 class NDArrayVar(Generic[_T], SVar[np.ndarray]):
@@ -835,6 +854,7 @@ class NDArrayVar(Generic[_T], SVar[np.ndarray]):
             True if validation passes.
 
         Raises:
+            AssertionError: If the variable name is not set.
             TypeError: If the value is not a NumPy ndarray.
             ValueError: If the array shape doesn't match the expected shape.
 

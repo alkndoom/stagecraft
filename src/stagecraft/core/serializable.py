@@ -1,3 +1,4 @@
+import enum
 from datetime import datetime
 from typing import Any, Dict, Mapping, Protocol, Type, TypeVar
 
@@ -19,20 +20,27 @@ class Serializable(BaseModel):
         alias_generator=snake_to_camel_case,
         populate_by_name=True,
         arbitrary_types_allowed=True,
-        json_encoders={
-            pd.DataFrame: lambda df: df.to_dict("records"),
-            pd.Series: lambda ser: ser.to_list(),
-            np.ndarray: lambda arr: arr.tolist(),
-            DictSerializable: lambda obj: obj.to_dict(),
-        },
         ser_json_timedelta="iso8601",
         ser_json_bytes="base64",
     )
 
     @field_serializer("*", check_fields=False)
-    def serialize_datetime(self, value):
+    def serialize_all_types(self, value):
+        """Serialize various types to JSON-compatible formats."""
         if isinstance(value, datetime):
             return value.strftime("%Y-%m-%d %H:%M:%S")
+        elif isinstance(value, pd.DataFrame):
+            return value.to_dict("records")
+        elif isinstance(value, pd.Series):
+            return value.to_list()
+        elif isinstance(value, np.ndarray):
+            return value.tolist()
+        elif isinstance(value, enum.Enum):
+            return value.value
+        elif hasattr(value, "to_dict") and callable(value.to_dict):
+            return value.to_dict()
+        elif isinstance(value, object):
+            return str(value)
         return value
 
     def to_dict(self, *, convert_keys: bool = False) -> Dict[str, Any]:
@@ -71,12 +79,6 @@ class FrozenSerializable(Serializable):
         alias_generator=snake_to_camel_case,
         populate_by_name=True,
         arbitrary_types_allowed=True,
-        json_encoders={
-            pd.DataFrame: lambda df: df.to_dict("records"),
-            pd.Series: lambda ser: ser.to_list(),
-            np.ndarray: lambda arr: arr.tolist(),
-            DictSerializable: lambda obj: obj.to_dict(),
-        },
         ser_json_timedelta="iso8601",
         ser_json_bytes="base64",
     )

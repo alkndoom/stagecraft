@@ -64,15 +64,14 @@ class PipelineContext:
             value: The value to store. Can be any Python object.
 
         Raises:
-            ValueError: If the variable name is empty.
+            AssertionError: If the variable name is not a non-empty string.
 
         Example:
             >>> context = PipelineContext()
             >>> context.set("data", pd.DataFrame())
             >>> context.set("model", trained_model)
         """
-        if not name:
-            raise ValueError("Variable name cannot be empty")
+        assert isinstance(name, str) and name, "Variable name must be a non-empty string"
 
         self._variables[name] = value
 
@@ -118,6 +117,27 @@ class PipelineContext:
                 f"Available variables: {available_vars}."
             )
         return self._variables[name]
+
+    def delete(self, name: str) -> bool:
+        """Delete a variable from the pipeline context.
+
+        This method removes a variable from the context, allowing its memory to be
+        freed if there are no other references to it. If memory tracking is enabled,
+        the variable will also be untracked.
+
+        Args:
+            name: The name of the variable to delete.
+
+        Returns:
+            True if the variable was deleted, False if the variable was not found.
+        """
+        if not self.has(name):
+            return False
+
+        del self._variables[name]
+        if self.memory_manager.config.enabled and self.memory_manager.config.track_per_variable:
+            self.memory_manager.tracker.untrack_variable(name)
+        return True
 
     def has(self, name: str) -> bool:
         """Check if a variable exists in the pipeline context.

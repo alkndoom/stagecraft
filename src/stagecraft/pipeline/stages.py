@@ -103,6 +103,8 @@ class ETLStage(ABC):
         ...         self.clean_data = df
     """
 
+    context: PipelineContext
+
     def __init__(
         self,
         name: Optional[str] = None,
@@ -237,7 +239,7 @@ class ETLStage(ABC):
             context: The pipeline context to inject. Cannot be None.
 
         Raises:
-            ValueError: If context is None.
+            AssertionError: If the provided context is None.
 
         Example:
             >>> stage = MyStage()
@@ -245,8 +247,7 @@ class ETLStage(ABC):
             >>> stage.set_context(context)
             >>> assert stage.context is context
         """
-        if context is None:
-            raise ValueError(f"Cannot set None as context for stage '{self.name}'")
+        assert context is not None, "Context cannot be None"
 
         self.context = context
         for sub_stage in self.sub_stages:
@@ -335,7 +336,7 @@ class ETLStage(ABC):
             else:
                 raise ValueError(f"Invalid variable marker: {marker}")
 
-        var.set_stage(self)
+        var._set_stage(self)
         self._dynamic_props[var.name] = {
             "getter": var.get,
             "setter": var.set,
